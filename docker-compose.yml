@@ -1,0 +1,17 @@
+version: '3'
+
+services:
+  termin-bot:
+    build: .
+    container_name: termin-bot
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    volumes:
+      - ./logs:/usr/src/app/logs
+    # Uncomment the following lines if you want to see the browser in action (requires X11)
+    # volumes:
+    #   - /tmp/.X11-unix:/tmp/.X11-unix
+    # environment:
+    #   - DISPLAY=:0 

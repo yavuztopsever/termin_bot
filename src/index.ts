@@ -1,222 +1,126 @@
 /// <reference lib="dom" />
-import puppeteer from 'puppeteer';
-import notifier from 'node-notifier';
-import twilio from 'twilio';
+import puppeteer, { Browser } from 'puppeteer';
+import { checkAppointments } from './services/appointmentService';
+import { config } from './config';
+import { setupTerminationHandler } from './utils/processUtils';
+import { sendSMS } from './services/notificationService';
 
-// Configuration
-const URL = 'https://stadt.muenchen.de/buergerservice/terminvereinbarung.html#/services/10339027/locations/10187259';
-const FULL_NAME = 'Yavuz Topsever';
-const EMAIL = 'yavuz.topsever@windowslive.com';
-const PARTY_SIZE = '1';
-const PHONE_NUMBER = '+491627621469';
+// Maximum number of browser launch retries
+const MAX_BROWSER_RETRIES = 3;
 
-// Twilio Configuration
-const TWILIO_ACCOUNT_SID = 'YOUR_TWILIO_ACCOUNT_SID'; // Replace with your Twilio Account SID
-const TWILIO_AUTH_TOKEN = 'YOUR_TWILIO_AUTH_TOKEN';   // Replace with your Twilio Auth Token
-const TWILIO_PHONE_NUMBER = 'YOUR_TWILIO_PHONE_NUMBER'; // Replace with your Twilio phone number
-const twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+/**
+ * Main function to run the appointment checker
+ */
+async function runAppointmentChecker() {
+  let browser: Browser | null = null;
+  let retryCount = 0;
+  
+  while (retryCount < MAX_BROWSER_RETRIES) {
+    try {
+      // Launch browser with Docker-compatible configuration
+      browser = await puppeteer.launch({ 
+        headless: true,
+        defaultViewport: null,
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--disable-gpu',
+          '--window-size=1280,720'
+        ],
+        ignoreHTTPSErrors: true,
+        timeout: 30000 // Increase timeout to 30 seconds
+      });
+      
+      const page = await browser.newPage();
+      
+      // Set a longer navigation timeout
+      page.setDefaultNavigationTimeout(60000); // 60 seconds
+      
+      // Navigate to the main URL once
+      await page.goto(config.URL, { waitUntil: 'networkidle2' });
+      
+      console.log('Starting appointment checker...');
+      console.log(`Will check every ${config.CHECK_INTERVAL / 1000} seconds continuously`);
 
-// API Endpoints
-const API_BASE_URL = 'https://www48.muenchen.de/buergeransicht/api/backend';
-const AVAILABLE_DAYS_ENDPOINT = `${API_BASE_URL}/available-days`;
-const AVAILABLE_APPOINTMENTS_ENDPOINT = `${API_BASE_URL}/available-appointments`;
-const BOOK_APPOINTMENT_ENDPOINT = `${API_BASE_URL}/book-appointment`;
+      // Send startup notification
+      await sendSMS('Appointment checker started. Will notify when an appointment is found.');
 
-// Constants for API requests
-const OFFICE_ID = '10187259';
-const SERVICE_ID = '10339027';
-const SERVICE_COUNT = '1';
+      // Initial check
+      let success = await checkAppointments(page);
+      let checkCount = 1;
 
-// Check interval in milliseconds (8 seconds)
-const CHECK_INTERVAL = 8 * 1000;
+      // If initial check didn't succeed, start periodic checking
+      if (!success) {
+        let nextCheckTime = Date.now() + config.CHECK_INTERVAL;
+        
+        // Display countdown timer
+        const countdownInterval = setInterval(() => {
+          const now = Date.now();
+          const timeRemaining = nextCheckTime - now;
+          if (timeRemaining > 0) {
+            process.stdout.write(`\rWaiting for next check (${checkCount}): ${Math.ceil(timeRemaining / 1000)}s`);
+          }
+        }, 1000);
 
-// Time window configuration
-const START_HOUR = 6;  // 6 AM
-const END_HOUR = 8;    // 8 AM
+        // Periodic check interval
+        const checkInterval = setInterval(async () => {
+          try {
+            success = await checkAppointments(page);
+            checkCount++;
+            if (success) {
+              clearInterval(checkInterval);
+              clearInterval(countdownInterval);
+              await browser!.close();
+              process.exit(0);
+            }
+            nextCheckTime = Date.now() + config.CHECK_INTERVAL;
+          } catch (error) {
+            console.error('Error during check:', error);
+            // Continue checking despite errors
+          }
+        }, config.CHECK_INTERVAL);
 
-// Function to check if current time is within the allowed window
-function isWithinTimeWindow(): boolean {
-  const now = new Date();
-  const hour = now.getHours();
-  return hour >= START_HOUR && hour < END_HOUR;
-}
-
-// Function to send SMS notification
-async function sendSMS(message: string) {
-  try {
-    const sms = await twilioClient.messages.create({
-      body: message,
-      from: TWILIO_PHONE_NUMBER,
-      to: PHONE_NUMBER
-    });
-    console.log('SMS sent successfully:', sms.sid);
-  } catch (error) {
-    console.error('Failed to send SMS:', error);
-  }
-}
-
-// Function to send notifications
-async function sendNotifications(title: string, message: string) {
-  // Send desktop notification
-  notifier.notify({
-    title,
-    message,
-    sound: true,
-    wait: true
-  });
-
-  // Send SMS notification
-  await sendSMS(message);
-}
-
-// Function to check for available appointments
-async function checkAppointments(page: puppeteer.Page): Promise<boolean> {
-  try {
-    if (!isWithinTimeWindow()) {
-      console.log(`[${new Date().toLocaleString()}] Outside checking window (${START_HOUR}:00-${END_HOUR}:00). Waiting...`);
-      return false;
-    }
-
-    // Calculate date range (6 months from today)
-    const startDate = new Date().toISOString().split('T')[0];
-    const endDate = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-    // First API request to get available days
-    console.log(`[${new Date().toLocaleString()}] Checking available days...`);
-    const availableDaysUrl = `${AVAILABLE_DAYS_ENDPOINT}?${new URLSearchParams({
-      startDate,
-      endDate,
-      officeId: OFFICE_ID,
-      serviceId: SERVICE_ID,
-      serviceCount: SERVICE_COUNT
-    })}`;
-
-    const availableDaysResponse = await page.goto(availableDaysUrl);
-    const availableDaysData = await availableDaysResponse?.json();
-
-    if (availableDaysData && Array.isArray(availableDaysData) && availableDaysData.length > 0) {
-      // Get the first available date
-      const firstAvailableDate = availableDaysData[0];
-      console.log('First available date:', firstAvailableDate);
-
-      // Second API request to get available appointments for that date
-      console.log('Checking available appointments for the first available date...');
-      const availableAppointmentsUrl = `${AVAILABLE_APPOINTMENTS_ENDPOINT}?${new URLSearchParams({
-        date: firstAvailableDate,
-        officeId: OFFICE_ID,
-        serviceId: SERVICE_ID,
-        serviceCount: SERVICE_COUNT
-      })}`;
-
-      const availableAppointmentsResponse = await page.goto(availableAppointmentsUrl);
-      const availableAppointmentsData = await availableAppointmentsResponse?.json();
-
-      if (availableAppointmentsData && Array.isArray(availableAppointmentsData) && availableAppointmentsData.length > 0) {
-        // Get the first available appointment
-        const firstAppointment = availableAppointmentsData[0];
-        console.log('Found appointment:', firstAppointment);
-
-        const notificationMessage = `Found appointment on ${firstAvailableDate} at ${firstAppointment.time}`;
-        await sendNotifications('Appointment Available!', notificationMessage);
-
-        // Try to book the appointment
-        console.log('Attempting to book the appointment...');
-        const bookingUrl = `${BOOK_APPOINTMENT_ENDPOINT}?${new URLSearchParams({
-          date: firstAvailableDate,
-          time: firstAppointment.time,
-          officeId: OFFICE_ID,
-          serviceId: SERVICE_ID,
-          serviceCount: SERVICE_COUNT,
-          name: FULL_NAME,
-          email: EMAIL,
-          numberOfPersons: PARTY_SIZE
-        })}`;
-
-        const bookingResponse = await page.goto(bookingUrl);
-        const bookingData = await bookingResponse?.json();
-
-        if (bookingData && bookingData.success) {
-          console.log('Successfully booked appointment!');
-          const successMessage = `Successfully booked appointment for ${firstAvailableDate} at ${firstAppointment.time}`;
-          await sendNotifications('Appointment Booked!', successMessage);
-          return true; // Stop checking after successful booking
-        } else {
-          console.log('Failed to book appointment:', bookingData);
-          await sendSMS(`Failed to book appointment for ${firstAvailableDate} at ${firstAppointment.time}. Will keep trying.`);
-          return false; // Continue checking if booking failed
+        // Handle process termination
+        setupTerminationHandler(browser, checkInterval, countdownInterval);
+        
+        // Break out of retry loop since we've successfully started
+        break;
+      } else {
+        await browser.close();
+        process.exit(0);
+      }
+    } catch (error) {
+      retryCount++;
+      console.error(`Browser launch attempt ${retryCount} failed:`, error);
+      
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (closeError) {
+          console.error('Error closing browser:', closeError);
         }
       }
+      
+      if (retryCount >= MAX_BROWSER_RETRIES) {
+        console.error('Maximum browser launch retries exceeded. Exiting.');
+        await sendSMS(`Error in appointment checker: Maximum browser launch retries exceeded.`);
+        process.exit(1);
+      }
+      
+      // Wait before retrying
+      console.log(`Retrying in 5 seconds...`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
     }
-
-    console.log(`[${new Date().toLocaleString()}] No available appointments found.`);
-    return false;
-  } catch (error) {
-    console.error('Error checking appointments:', error);
-    await sendSMS(`Error occurred while checking appointments: ${error.message}`);
-    return false;
   }
 }
 
-// Main function
-(async () => {
-  try {
-    const browser = await puppeteer.launch({ 
-      headless: false,
-      defaultViewport: null,
-      args: ['--start-maximized', '--disable-features=site-per-process']
-    });
-    const page = await browser.newPage();
-    
-    // Enable request interception
-    await page.setRequestInterception(true);
-    
-    // Log all requests
-    page.on('request', request => {
-      console.log('Request:', request.url());
-      request.continue();
-    });
-    
-    // Log all responses
-    page.on('response', response => {
-      console.log('Response:', response.url(), response.status());
-    });
-    
-    // Set a longer default timeout
-    page.setDefaultTimeout(60000);
-
-    console.log('Starting periodic appointment checker...');
-    console.log(`Will check every ${CHECK_INTERVAL / 1000} seconds between ${START_HOUR}:00 and ${END_HOUR}:00.`);
-
-    // Send initial notification
-    await sendSMS(`Appointment checker started. Will check every ${CHECK_INTERVAL / 1000} seconds between ${START_HOUR}:00 and ${END_HOUR}:00.`);
-
-    // Initial check
-    let success = await checkAppointments(page);
-
-    // If initial check didn't succeed, start periodic checking
-    if (!success) {
-      const intervalId = setInterval(async () => {
-        success = await checkAppointments(page);
-        if (success) {
-          clearInterval(intervalId);
-          await browser.close();
-          process.exit(0);
-        }
-      }, CHECK_INTERVAL);
-
-      // Handle process termination
-      process.on('SIGINT', async () => {
-        clearInterval(intervalId);
-        await browser.close();
-        await sendSMS('Appointment checker stopped by user.');
-        process.exit(0);
-      });
-    } else {
-      await browser.close();
-      process.exit(0);
-    }
-  } catch (error) {
-    console.error('An error occurred:', error);
+// Only run the main function if this file is being run directly
+if (require.main === module) {
+  runAppointmentChecker().catch(async (error) => {
+    console.error('Unhandled error in appointment checker:', error);
     
     if (error instanceof Error) {
       console.error('Error details:', error.message);
@@ -225,5 +129,5 @@ async function checkAppointments(page: puppeteer.Page): Promise<boolean> {
     }
     
     process.exit(1);
-  }
-})();
+  });
+}
