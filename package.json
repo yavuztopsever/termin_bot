@@ -20,10 +20,11 @@
   "author": "Yavuz Topsever",
   "license": "MIT",
   "dependencies": {
+    "axios": "^1.8.3",
     "node-notifier": "^10.0.1",
     "puppeteer": "^21.7.0",
-    "twilio": "^4.20.1",
     "ts-node": "^10.9.2",
+    "twilio": "^4.20.1",
     "typescript": "^5.3.3"
   },
   "devDependencies": {

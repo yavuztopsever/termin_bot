@@ -4,12 +4,16 @@ An automated appointment booking bot for München city services using Puppeteer 
 
 ## Features
 
-- Continuous appointment checking at regular intervals
-- 15-second interval checks
+- Dual approach: Browser-based and direct API requests for maximum efficiency
+- Randomized check intervals (5-8 seconds) to avoid detection
+- Adaptive timing with more aggressive checks during peak hours
+- User agent rotation and browser fingerprinting protection
+- Robust error handling with exponential backoff and retry logic
+- Comprehensive logging and debugging capabilities
 - Desktop and SMS notifications via Twilio
 - Automatic booking when slots become available
-- Error handling and status notifications
-- Runs in headless mode for better stability
+- Parallel processing for multiple locations
+- Debug mode with screenshots and network monitoring
 - Docker support for easy deployment
 
 ## Prerequisites
@@ -72,37 +76,88 @@ docker-compose up -d
 
 ### Running Locally
 
-1. Start the bot:
+1. Validate API endpoints (recommended before first run):
 ```bash
-npm start
+./validate-api.sh
 ```
+This will:
+   - Launch a browser in visible mode
+   - Navigate to the appointment booking page
+   - Test API endpoints and capture requests/responses
+   - Save screenshots and network logs to the debug directory
+   - Help verify that your configuration is correct
 
-2. The bot will:
-   - Run continuously in headless mode (no visible browser window)
-   - Check for appointments every 15 seconds
+2. Start the bot:
+
+   Option A: Using npm
+   ```bash
+   npm start
+   ```
+
+   Option B: Using the executable (after building)
+   ```bash
+   ./termin-bot
+   ```
+
+   Option C: Installing the executable system-wide
+   ```bash
+   # Build the project first
+   npm run build
+   
+   # Make the script executable (if not already)
+   chmod +x termin-bot
+   
+   # Copy to a directory in your PATH (requires sudo)
+   sudo cp termin-bot /usr/local/bin/
+   
+   # Now you can run it from anywhere
+   termin-bot
+   ```
+
+3. The bot will:
+   - Run dual approaches simultaneously (browser-based and direct API)
+   - Use randomized check intervals to avoid detection
+   - Check more aggressively during peak hours
+   - Rotate user agents and browser fingerprints
    - Send notifications when appointments are found
    - Automatically attempt to book available slots
    - Send SMS updates about booking status
 
-3. To stop the bot:
+4. Debug mode:
+   - Set `DEBUG_MODE = true` in src/index.ts to enable debug features
+   - This will save screenshots, HTML, and network logs to the debug directory
+   - The browser will run in visible mode for easier debugging
+
+5. To stop the bot:
    - Press Ctrl+C in the terminal
    - The bot will send a final SMS notification before shutting down
 
 ### Running with Docker
 
-1. Start the bot as a background service:
+1. Use the provided script to build and run the bot:
 ```bash
-docker-compose up -d
+./run-docker.sh
 ```
+
+This script will:
+- Build the Docker image with all dependencies
+- Start the container in detached mode
+- Set up volume mounts for logs and debug information
 
 2. View logs:
 ```bash
-docker logs -f termin-bot
+docker-compose logs -f
 ```
 
 3. Stop the bot:
 ```bash
 docker-compose down
+```
+
+4. Health check:
+The container includes a health check endpoint that Docker uses to monitor the application's status. You can manually check it with:
+```bash
+curl http://localhost:3000/health
 ```
 
 ## Troubleshooting
@@ -117,16 +172,24 @@ If you encounter browser connection issues:
 
 ```
 src/
-├── config.ts                  # Configuration settings
-├── index.ts                   # Main entry point
+├── config.ts                    # Configuration settings
+├── index.ts                     # Main entry point
+├── validateApi.ts               # API validation tool
 ├── services/
-│   ├── appointmentService.ts  # Appointment checking and booking
-│   └── notificationService.ts # SMS and desktop notifications
+│   ├── appointmentService.ts    # Appointment checking and booking
+│   ├── apiService.ts            # Browser-based API client
+│   ├── coordinationService.ts   # Coordinates both approaches
+│   ├── directApiService.ts      # Direct API client
+│   ├── loggingService.ts        # Structured logging
+│   └── notificationService.ts   # SMS and desktop notifications
 ├── utils/
-│   ├── processUtils.ts        # Process handling utilities
-│   └── timeUtils.ts           # Time formatting utilities
+│   ├── browserUtils.ts          # Browser fingerprinting protection
+│   ├── debugUtils.ts            # Debugging and monitoring tools
+│   ├── processUtils.ts          # Process handling utilities
+│   ├── retryUtils.ts            # Retry logic with exponential backoff
+│   └── timeUtils.ts             # Time formatting utilities
 └── __tests__/
-    └── booking.test.ts        # Tests for appointment booking
+    └── booking.test.ts          # Tests for appointment booking
 ```
 
 ## API Endpoints Used
@@ -139,9 +202,39 @@ src/
 
 You can modify the following settings in `src/config.ts`:
 
-- `CHECK_INTERVAL`: Time between checks (default: 15 seconds)
+### Basic Settings
+- `URL`: The appointment booking page URL
+- `FULL_NAME`: Your full name for the appointment
+- `EMAIL`: Your email address
+- `PARTY_SIZE`: Number of people for the appointment
+- `PHONE_NUMBER`: Your phone number for SMS notifications
+
+### Twilio Settings
+- `TWILIO_ACCOUNT_SID`: Your Twilio account SID
+- `TWILIO_AUTH_TOKEN`: Your Twilio auth token
+- `TWILIO_PHONE_NUMBER`: Your Twilio phone number
+
+### API Settings
+- `API_BASE_URL`: Base URL for the API endpoints
 - `OFFICE_ID`: Target office ID
 - `SERVICE_ID`: Target service ID
+- `SERVICE_COUNT`: Number of services to book
+
+### Timing Settings
+- `CHECK_INTERVAL`: Default check interval (5 seconds)
+- `BROWSER_CHECK_INTERVAL`: Browser-based approach check interval (8 seconds)
+- `API_CHECK_INTERVAL`: Direct API approach check interval (5 seconds)
+- `MIN_CHECK_INTERVAL`: Minimum interval during aggressive mode (3 seconds)
+- `AGGRESSIVE_MODE_HOURS`: Hours when slots typically appear (more frequent checks)
+- `JITTER_FACTOR`: Randomization factor to avoid detection (0.3 = ±30%)
+
+### Retry Settings
+- `MAX_RETRIES`: Maximum number of retries for failed requests
+- `INITIAL_BACKOFF_MS`: Initial backoff delay for retries
+- `MAX_BACKOFF_MS`: Maximum backoff delay for retries
+
+### Location Settings
+- `LOCATIONS`: Array of office locations to check in parallel
 
 ## Error Handling
 

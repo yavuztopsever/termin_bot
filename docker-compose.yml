@@ -8,10 +8,20 @@ services:
     environment:
       - NODE_ENV=production
       - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      - DEBUG_MODE=true
     volumes:
       - ./logs:/usr/src/app/logs
+      - ./debug:/usr/src/app/debug
     # Uncomment the following lines if you want to see the browser in action (requires X11)
     # volumes:
     #   - /tmp/.X11-unix:/tmp/.X11-unix
     # environment:
-    #   - DISPLAY=:0 
+    #   - DISPLAY=:0
+    
+    # Health check to ensure the container is running properly
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', res => res.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
