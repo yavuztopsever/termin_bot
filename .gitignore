@@ -1,18 +1,38 @@
+# Logs
+logs/
+*.log
+
+# Debug files
+debug/
+
 # Dependencies
 node_modules/
-.pnp/
-.pnp.js
+.npm
+.yarn
 
-# Testing
+# Environment variables
+.env
+.env.*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build output
+dist/
+build/
+out/
+
+# Test coverage
 coverage/
 
-# Production
-build/
-dist/
-
 # Misc
-.DS_Store
-.env
 .env.local
 .env.development.local
 .env.test.local
@@ -24,8 +44,6 @@ yarn-debug.log*
 yarn-error.log*
 
 # Editor directories and files
-.idea/
-.vscode/
 *.swp
 *.swo
 *.swn
