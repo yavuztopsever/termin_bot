@@ -1,0 +1,21 @@
+{
+  "timestamp": "2025-03-17T01:16:04.162Z",
+  "method": "GET",
+  "url": "https://www48.muenchen.de/buergeransicht/api/backend/captcha-details",
+  "requestData": {
+    "method": "GET",
+    "url": "https://www48.muenchen.de/buergeransicht/api/backend/captcha-details",
+    "headers": {
+      "referer": "https://stadt.muenchen.de/",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:94.0) Gecko/20100101 Firefox/94.0",
+      "accept": "*/*"
+    }
+  },
+  "responseData": {
+    "siteKey": "FCMK1EFAS0BSFHVH",
+    "captchaEndpoint": "https://eu-api.friendlycaptcha.eu/api/v1/siteverify",
+    "puzzle": "https://eu-api.friendlycaptcha.eu/api/v1/puzzle",
+    "captchaEnabled": true
+  },
+  "statusCode": 200
+}
