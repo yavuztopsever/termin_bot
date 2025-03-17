@@ -20,7 +20,9 @@
   "author": "Yavuz Topsever",
   "license": "MIT",
   "dependencies": {
+    "@types/dotenv": "^6.1.1",
     "axios": "^1.8.3",
+    "dotenv": "^16.4.7",
     "node-notifier": "^10.0.1",
     "puppeteer": "^21.7.0",
     "ts-node": "^10.9.2",
