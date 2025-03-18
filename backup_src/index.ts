@@ -14,16 +14,13 @@ import {
   debugConfig
 } from './utils/debugUtils';
 import { applyUserAgentProfile } from './utils/browserUtils';
-import { startHealthCheckServer, updateHealthStatus } from './healthCheck';
+import { startHealthCheckServer } from './healthCheck';
 
 // Maximum number of browser launch retries
 const MAX_BROWSER_RETRIES = 3;
 
 // Debug mode flag (set to false in production)
 const DEBUG_MODE = true;
-
-// Flag to track if we've already sent a startup notification
-let startupNotificationSent = false;
 
 /**
  * Main function to run the appointment checker
@@ -90,17 +87,11 @@ async function runAppointmentChecker() {
       }
       
       logger.info('Browser initialized successfully');
-      
-      // Update health status for browser
-      updateHealthStatus('browserInitialized', true);
 
-      // Send startup notification (only once)
-      if (!startupNotificationSent) {
-        const smsResult = await sendSMS('Appointment checker started with dual approach. Will notify when an appointment is found.');
-        if (!smsResult) {
-          logger.warn('SMS notification disabled or failed. Continuing without SMS notifications.');
-        }
-        startupNotificationSent = true;
+      // Send startup notification
+      const smsResult = await sendSMS('Appointment checker started with dual approach. Will notify when an appointment is found.');
+      if (!smsResult) {
+        logger.warn('SMS notification disabled or failed. Continuing without SMS notifications.');
       }
       
       // Handle process termination
@@ -121,9 +112,6 @@ async function runAppointmentChecker() {
     } catch (error) {
       retryCount++;
       logger.error(`Browser launch attempt ${retryCount} failed:`, error as Error);
-      
-      // Update health status to indicate browser initialization failed
-      updateHealthStatus('browserInitialized', false);
       
       if (browser) {
         try {
@@ -151,10 +139,6 @@ async function runAppointmentChecker() {
 if (require.main === module) {
   runAppointmentChecker().catch(async (error) => {
     logger.error('Unhandled error in appointment checker:', error as Error);
-    
-    // Update health status to indicate both components are unhealthy
-    updateHealthStatus('browserInitialized', false);
-    updateHealthStatus('apiConnected', false);
     
     if (error instanceof Error) {
       logger.error('Error details:', error);

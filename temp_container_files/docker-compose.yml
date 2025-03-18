@@ -2,7 +2,7 @@ version: '3'
 
 services:
   termin-bot:
-    image: termin-bot:latest@sha256:70ae8cd05485986ba1a3dad93cec695052e7a369bb0a668b853d487e3b45db47
+    build: .
     container_name: termin-bot
     restart: unless-stopped
     environment:

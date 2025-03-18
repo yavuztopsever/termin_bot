@@ -3,7 +3,6 @@ import { config } from '../config';
 import { logger } from './loggingService';
 import { withRetry } from '../utils/retryUtils';
 import { getHeadersForUserAgentProfile, UserAgentRotator } from '../utils/browserUtils';
-import { updateHealthStatus } from '../healthCheck';
 
 // Response type definitions (same as in apiService.ts)
 export type AvailableDaysResponse = string[] | {
@@ -275,18 +274,9 @@ export class DirectApiClient {
       const days = await this.getAvailableDays(startDate, endDate);
       
       // If we got here, the API is healthy
-      const isHealthy = true;
-      
-      // Update health status
-      updateHealthStatus('apiConnected', isHealthy);
-      
-      return isHealthy;
+      return true;
     } catch (error) {
       logger.error(`API health check failed: ${error instanceof Error ? error.message : String(error)}`);
-      
-      // Update health status to indicate API is not connected
-      updateHealthStatus('apiConnected', false);
-      
       return false;
     }
   }

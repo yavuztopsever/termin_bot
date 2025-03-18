@@ -4,7 +4,8 @@ import { DirectApiClient } from './directApiService';
 import { checkAppointments } from './appointmentService';
 import { logger } from './loggingService';
 import { config } from '../config';
-import { sendSMS, sendNotifications } from './notificationService';
+import { sendSMS } from './notificationService';
+import { statusService, AppointmentStatus } from './statusService';
 import { applyUserAgentProfile, getRandomUserAgentProfile } from '../utils/browserUtils';
 
 // Track booking status across approaches
@@ -110,24 +111,41 @@ export async function startDirectApiApproach(): Promise<void> {
               const firstAppointment = availableAppointments[0];
               logger.info(`Found available appointment at ${location.name} on ${firstAvailableDate} at ${firstAppointment.time}`);
               
-              // Send SMS about available appointment
-              await sendSMS(`Found available appointment at ${location.name} on ${firstAvailableDate} at ${firstAppointment.time}`);
+              // Update status to appointment found
+              statusService.updateStatus(AppointmentStatus.APPOINTMENT_FOUND, {
+                date: firstAvailableDate,
+                time: firstAppointment.time,
+                location: location.name
+              });
+              
+              // Update status to booking in progress
+              statusService.updateStatus(AppointmentStatus.BOOKING_IN_PROGRESS, {
+                date: firstAvailableDate,
+                time: firstAppointment.time,
+                location: location.name
+              });
               
               // Try to book the appointment
               const bookingResponse = await directApiClient.bookAppointment(firstAvailableDate, firstAppointment.time, location.id);
               
               if (bookingResponse.success) {
-                // Send notifications about successful booking
-                await sendNotifications(
-                  'Appointment Booked!', 
-                  `Successfully booked appointment at ${location.name} for ${firstAvailableDate} at ${firstAppointment.time}`
-                );
+                // Update status to booking successful
+                statusService.updateStatus(AppointmentStatus.BOOKING_SUCCESSFUL, {
+                  date: firstAvailableDate,
+                  time: firstAppointment.time,
+                  location: location.name
+                });
                 return true;
               } else {
                 // Handle booking failure
                 const errorMessage = bookingResponse.error || bookingResponse.message || 'Unknown booking error';
                 logger.error(`Booking failed at ${location.name}: ${errorMessage}`);
-                await sendSMS(`Booking attempt failed at ${location.name}: ${errorMessage}`);
+                statusService.updateStatus(AppointmentStatus.BOOKING_FAILED, {
+                  date: firstAvailableDate,
+                  time: firstAppointment.time,
+                  location: location.name,
+                  error: errorMessage
+                });
               }
             }
           }
@@ -135,6 +153,10 @@ export async function startDirectApiApproach(): Promise<void> {
           return false;
         } catch (error) {
           logger.error(`Error checking location ${location.name}:`, error instanceof Error ? error : new Error(String(error)));
+          statusService.updateStatus(AppointmentStatus.API_ERROR, {
+            location: location.name,
+            message: error instanceof Error ? error.message : String(error)
+          });
           return false;
         }
       })
