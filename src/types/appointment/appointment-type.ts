@@ -1,7 +1,0 @@
-export enum AppointmentType {
-  PASSPORT = 'PASSPORT',
-  VISA = 'VISA',
-  RESIDENCE_PERMIT = 'RESIDENCE_PERMIT',
-  CITIZENSHIP = 'CITIZENSHIP',
-  OTHER = 'OTHER'
-} 

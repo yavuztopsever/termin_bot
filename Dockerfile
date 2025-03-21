@@ -1,36 +1,40 @@
-FROM node:18-slim
+FROM python:3.9-slim-buster
 
-# Install dependencies for Puppeteer
+# Install Chrome and ChromeDriver dependencies
 RUN apt-get update && apt-get install -y \
-    chromium \
-    fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf \
-    libxss1 libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libasound2 \
-    --no-install-recommends \
+    wget \
+    gnupg \
+    unzip \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Set environment variables for Puppeteer
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
-    NODE_ENV=production
+# Install ChromeDriver
+RUN CHROME_DRIVER_VERSION=`curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE` \
+    && wget -q -O /tmp/chromedriver.zip https://chromedriver.storage.googleapis.com/$CHROME_DRIVER_VERSION/chromedriver_linux64.zip \
+    && unzip /tmp/chromedriver.zip -d /usr/local/bin/ \
+    && rm /tmp/chromedriver.zip \
+    && chmod +x /usr/local/bin/chromedriver
 
-# Create app directory
-WORKDIR /usr/src/app
+# Create and set working directory
+WORKDIR /app
 
-# Create directories for debug and logs
-RUN mkdir -p /usr/src/app/debug/screenshots \
-    /usr/src/app/debug/html \
-    /usr/src/app/debug/network \
-    /usr/src/app/logs
-
-# Copy package files and install dependencies
-COPY package*.json ./
-RUN npm install
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY src/ src/
 
-# Set permissions for directories
-RUN chmod -R 777 /usr/src/app/debug /usr/src/app/logs
+# Create necessary directories
+RUN mkdir -p logs
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV DOCKER_MODE=True
 
 # Run the application
-CMD ["npm", "start"]
+CMD ["python", "src/main.py"] 

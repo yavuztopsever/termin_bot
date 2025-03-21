@@ -1,27 +1,74 @@
-version: '3'
+version: '3.8'
 
 services:
-  termin-bot:
-    image: termin-bot:latest@sha256:70ae8cd05485986ba1a3dad93cec695052e7a369bb0a668b853d487e3b45db47
-    container_name: termin-bot
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-      - DEBUG_MODE=true
+  redis:
+    image: redis:7.2.4
+    restart: always
+    ports:
+      - "6379:6379"
     volumes:
-      - ./logs:/usr/src/app/logs
-      - ./debug:/usr/src/app/debug
-    # Uncomment the following lines if you want to see the browser in action (requires X11)
-    # volumes:
-    #   - /tmp/.X11-unix:/tmp/.X11-unix
-    # environment:
-    #   - DISPLAY=:0
-    
-    # Health check to ensure the container is running properly
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', res => res.statusCode === 200 ? process.exit(0) : process.exit(1))"]
-      interval: 1m
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+      - redis_data:/data
+
+  bot:
+    build: .
+    restart: always
+    depends_on:
+      - redis
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DATABASE_URL=sqlite:///app.db
+      - REDIS_URI=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+      - CHECK_INTERVAL=300
+      - RETRY_DELAY=60
+      - MAX_RETRIES=3
+      - WEBSITE_BASE_URL=${WEBSITE_BASE_URL}
+      - WEBSITE_TIMEOUT=30
+      - CAPTCHA_ENABLED=true
+      - CAPTCHA_SOLUTION_TIMEOUT=30
+      - CAPTCHA_2CAPTCHA_API_KEY=${CAPTCHA_2CAPTCHA_API_KEY}
+      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-2captcha}
+      - CHECK_RATE_LIMIT=10
+      - CHECK_RATE_WINDOW=60
+      - BOOK_RATE_LIMIT=5
+      - BOOK_RATE_WINDOW=60
+      - USER_NAME=${USER_NAME}
+      - USER_EMAIL=${USER_EMAIL}
+      - PERSON_COUNT=${PERSON_COUNT}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+
+  celery:
+    build: .
+    restart: always
+    depends_on:
+      - redis
+    command: celery -A src.tasks.celery worker --loglevel=info
+    environment:
+      - DATABASE_URL=sqlite:///app.db
+      - REDIS_URI=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+      - WEBSITE_BASE_URL=${WEBSITE_BASE_URL}
+      - WEBSITE_TIMEOUT=30
+      - CAPTCHA_ENABLED=true
+      - CAPTCHA_SOLUTION_TIMEOUT=30
+      - CAPTCHA_2CAPTCHA_API_KEY=${CAPTCHA_2CAPTCHA_API_KEY}
+      - CAPTCHA_SOLVER=${CAPTCHA_SOLVER:-2captcha}
+      - CHECK_RATE_LIMIT=10
+      - CHECK_RATE_WINDOW=60
+      - BOOK_RATE_LIMIT=5
+      - BOOK_RATE_WINDOW=60
+      - USER_NAME=${USER_NAME}
+      - USER_EMAIL=${USER_EMAIL}
+      - PERSON_COUNT=${PERSON_COUNT}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+
+volumes:
+  redis_data:
+
+networks:
+  mta_network:
+    driver: bridge

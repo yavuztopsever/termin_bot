@@ -1,0 +1,20 @@
+{
+  "timestamp": "2025-03-21T00:13:58.654Z",
+  "method": "GET",
+  "url": "https://www48.muenchen.de/buergeransicht/api/backend/available-days?startDate=2025-03-21&endDate=2025-03-28&officeId=10187259&serviceId=10339027&serviceCount=1",
+  "requestData": {
+    "method": "GET",
+    "url": "https://www48.muenchen.de/buergeransicht/api/backend/available-days?startDate=2025-03-21&endDate=2025-03-28&officeId=10187259&serviceId=10339027&serviceCount=1",
+    "headers": {
+      "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
+      "referer": "https://stadt.muenchen.de/",
+      "accept": "*/*"
+    }
+  },
+  "responseData": {
+    "errorCode": "noAppointmentForThisScope",
+    "errorMessage": "An diesem Standort gibt es aktuell leider keine freien Termine",
+    "lastModified": 1742516038699
+  },
+  "statusCode": 200
+}
