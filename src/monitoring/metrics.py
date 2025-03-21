@@ -1,6 +1,8 @@
 """Metrics collector for monitoring application performance."""
 
 import time
+import os
+import psutil
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import threading
@@ -390,6 +392,106 @@ class MetricsCollector:
             self._notifications = deque(maxlen=100)
             self._booking_attempts = deque(maxlen=100)
 
+class MetricsManager(MetricsCollector):
+    """Extended metrics collector with system metrics functionality."""
+    
+    def __init__(self):
+        """Initialize metrics manager."""
+        super().__init__()
+        self._process = psutil.Process(os.getpid())
+        self._health_metrics = {}
+        
+    def update_health_metrics(self, metrics):
+        """
+        Update health metrics from the health monitor.
+        
+        Args:
+            metrics: Health metrics object
+        """
+        try:
+            if hasattr(metrics, 'to_dict'):
+                self._health_metrics = metrics.to_dict()
+            elif isinstance(metrics, dict):
+                self._health_metrics = metrics
+            else:
+                self._health_metrics = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "error": "Invalid metrics format"
+                }
+                
+            # Update gauges based on health metrics
+            if isinstance(self._health_metrics, dict):
+                if "cpu_usage" in self._health_metrics:
+                    self.set_gauge("cpu_usage", self._health_metrics["cpu_usage"])
+                if "memory_usage" in self._health_metrics:
+                    self.set_gauge("memory_usage", self._health_metrics["memory_usage"])
+                if "disk_usage" in self._health_metrics:
+                    self.set_gauge("disk_usage", self._health_metrics["disk_usage"])
+                if "request_rate" in self._health_metrics:
+                    self.set_gauge("request_rate", self._health_metrics["request_rate"])
+                if "error_rate" in self._health_metrics:
+                    self.set_gauge("error_rate", self._health_metrics["error_rate"])
+                    
+        except Exception as e:
+            logger.error(f"Error updating health metrics: {str(e)}")
+        
+    async def get_system_metrics(self) -> Dict[str, Any]:
+        """
+        Get system metrics including CPU, memory, and application metrics.
+        
+        Returns:
+            Dictionary with system metrics
+        """
+        try:
+            # Get CPU and memory usage
+            cpu_usage = psutil.cpu_percent()
+            memory_usage = psutil.virtual_memory().percent
+            process_cpu = self._process.cpu_percent()
+            process_memory = self._process.memory_percent()
+            
+            # Get application metrics
+            app_metrics = self.get_all_metrics()
+            
+            # Calculate error rate
+            total_requests = self.get_counter("total_requests")
+            failed_requests = self.get_counter("failed_requests")
+            error_rate = (failed_requests / total_requests) if total_requests > 0 else 0
+            
+            # Combine metrics
+            metrics = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "cpu_usage": cpu_usage,
+                "memory_usage": memory_usage,
+                "process_cpu": process_cpu,
+                "process_memory": process_memory,
+                "request_count": total_requests,
+                "error_count": failed_requests,
+                "error_rate": error_rate,
+                "active_users": self.get_gauge("active_users"),
+                "subscription_count": self.get_gauge("active_subscriptions"),
+                "booking_success_rate": self.get_gauge("booking_success_rate"),
+                "response_times": {
+                    name: stats for name, stats in app_metrics.get("histograms", {}).items()
+                    if name.endswith("_duration")
+                }
+            }
+            
+            # Add health metrics if available
+            if self._health_metrics:
+                metrics["health"] = self._health_metrics
+                
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"Error getting system metrics: {str(e)}")
+            return {
+                "timestamp": datetime.utcnow().isoformat(),
+                "cpu_usage": 0,
+                "memory_usage": 0,
+                "error_rate": 0,
+                "error": str(e)
+            }
+
 # Create the metrics manager instance
-metrics_manager = MetricsCollector()
+metrics_manager = MetricsManager()
 metrics_collector = metrics_manager  # Alias for backward compatibility

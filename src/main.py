@@ -9,7 +9,7 @@ from fastapi import FastAPI
 import threading
 
 from src.bot.telegram_bot import bot
-from src.manager.tasks import celery_app
+from src.manager.tasks import celery
 from src.monitoring.api import app as monitoring_app
 from src.monitoring.health_check import start_health_monitoring, stop_health_monitoring
 from src.utils.logger import setup_logger
@@ -51,8 +51,27 @@ class MTAApplication:
                 logger.error("Invalid configuration, exiting")
                 sys.exit(1)
                 
-            # Initialize database pool
+            # Initialize database pool and ensure tables exist
             await db_pool.initialize()
+            
+            # Verify database tables exist
+            from sqlalchemy import text
+            async with db_pool.session() as session:
+                try:
+                    result = await session.execute(text("SELECT name FROM sqlite_master WHERE type='table';"))
+                    tables = result.scalars().all()
+                    if not tables:
+                        logger.warning("No tables found in database. Running database initialization...")
+                        from scripts.init_db import init_db
+                        await init_db()
+                    else:
+                        logger.info(f"Database tables verified: {', '.join(tables)}")
+                except Exception as e:
+                    logger.error(f"Error verifying database tables: {e}")
+                    logger.warning("Running database initialization...")
+                    from scripts.init_db import init_db
+                    await init_db()
+            
             logger.info("Initialized database pool")
             
             # Initialize API client
@@ -73,7 +92,7 @@ class MTAApplication:
             
             # Start health monitoring
             if METRICS_ENABLED:
-                start_health_monitoring()
+                await start_health_monitoring()
                 self.monitoring_thread = threading.Thread(
                     target=self._run_monitoring_server,
                     daemon=True
@@ -99,7 +118,7 @@ class MTAApplication:
         try:
             # Stop health monitoring
             if METRICS_ENABLED:
-                stop_health_monitoring()
+                await stop_health_monitoring()
                 if self.monitoring_thread:
                     self.monitoring_thread.join(timeout=5)
                 logger.info("Stopped monitoring server")

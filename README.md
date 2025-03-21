@@ -1,6 +1,6 @@
 # Munich Termin Automator (MTA) - API Edition
 
-A Telegram bot that automatically monitors, finds, and books appointments at Munich's public service offices through API requests.
+A Telegram bot that automatically monitors, finds, and books appointments at Munich's public service offices through API requests. The bot uses SQLite with SQLAlchemy for data persistence, Redis for task queuing and rate limiting, and Celery for background task processing.
 
 ## Features
 
@@ -9,15 +9,16 @@ A Telegram bot that automatically monitors, finds, and books appointments at Mun
 - 🤖 Telegram bot interface for easy interaction
 - 🔔 Real-time notifications for appointment availability and booking
 - 🛡️ Rate limiting and anti-bot detection measures
-- 📊 Logging and monitoring capabilities
+- 📊 Structured logging and monitoring capabilities
 - 🐳 Docker support for easy deployment
+- 📈 Health monitoring and metrics collection
+- 🔄 Asynchronous task processing with Celery
 
 ## Prerequisites
 
 - Python 3.9+
-- MongoDB
 - Redis
-- Chrome/Chromium (for website analysis)
+- SQLite
 - Docker and Docker Compose (for containerized deployment)
 
 ## Installation
@@ -43,16 +44,28 @@ A Telegram bot that automatically monitors, finds, and books appointments at Mun
    pip install -r requirements.txt
    ```
 
-4. Create a `.env` file with your configuration:
-   ```env
-   TELEGRAM_TOKEN=your_telegram_bot_token
-   MONGO_PASSWORD=your_mongodb_password
-   LOG_LEVEL=INFO
-   CHECK_INTERVAL=15
-   NUM_WORKERS=3
+4. Set up environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration
    ```
 
-5. Run the application:
+5. Initialize the database:
+   ```bash
+   python scripts/init_db.py
+   ```
+
+6. Start Redis:
+   ```bash
+   docker-compose up -d redis
+   ```
+
+7. Start Celery worker:
+   ```bash
+   celery -A src.tasks.celery worker --loglevel=info
+   ```
+
+8. Run the bot:
    ```bash
    python src/main.py
    ```
@@ -93,58 +106,104 @@ A Telegram bot that automatically monitors, finds, and books appointments at Mun
 termin_bot/
 ├── src/
 │   ├── api/              # API interaction
-│   ├── analyzer/         # Website analysis
 │   ├── bot/             # Telegram bot
 │   ├── config/          # Configuration
-│   ├── database/        # Database operations
-│   ├── manager/         # Appointment management
+│   ├── database/        # SQLite database operations
+│   ├── tasks/           # Celery tasks
 │   ├── utils/           # Utilities
 │   └── main.py          # Application entry point
 ├── tests/
 │   ├── unit/            # Unit tests
 │   ├── integration/     # Integration tests
 │   └── e2e/             # End-to-end tests
-├── logs/                # Log files
-├── .env                 # Environment variables
-├── requirements.txt     # Python dependencies
-├── Dockerfile          # Container definition
-├── docker-compose.yml  # Container orchestration
-└── README.md           # This file
+├── scripts/             # Utility scripts
+├── docs/               # Documentation
+├── logs/               # Log files
+├── .env                # Environment variables
+├── requirements.txt    # Python dependencies
+├── Dockerfile         # Container definition
+├── docker-compose.yml # Container orchestration
+└── README.md          # This file
 ```
+
+## Architecture
+
+### Database
+- SQLite database using SQLAlchemy ORM
+- Asynchronous database operations with aiosqlite
+- Models for Users, Subscriptions, Appointments, and Notifications
+
+### Task Queue
+- Celery for background task processing
+- Redis as message broker and result backend
+- Key tasks for appointment checking and booking
+
+### Rate Limiting
+- Redis-based rate limiting for external API calls
+- Configurable limits per operation type
+- Default limits:
+  - Check availability: 10 requests per minute
+  - Book appointment: 5 requests per minute
+
+### Monitoring
+- Structured logging with structlog
+- Error tracking with Sentry
+- Performance metrics collection
+- Health check endpoints:
+  - `/monitoring/health`
+  - `/monitoring/metrics`
+  - `/monitoring/metrics/history`
+  - `/monitoring/status/detailed`
 
 ## Configuration
 
 The application can be configured using environment variables or a `.env` file:
 
-- `TELEGRAM_TOKEN`: Your Telegram bot token
-- `MONGODB_URI`: MongoDB connection URI
-- `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
-- `CHECK_INTERVAL`: Minutes between appointment checks
-- `NUM_WORKERS`: Number of worker threads
-- `RETRY_DELAY`: Seconds between retries
-- `MAX_RETRIES`: Maximum number of retries
-- `DOCKER_MODE`: Whether running in Docker (True/False)
+### Database Configuration
+- `DATABASE_URL`: SQLite database URL
+- `REDIS_URI`: Redis connection URI
+
+### API Configuration
+- `API_BASE_URL`: Base URL for API requests
+- `API_KEY`: API key for authentication
+- `API_TIMEOUT`: Request timeout in seconds
+
+### Rate Limiting Configuration
+- `RATE_LIMIT_CONFIG`: Rate limiting settings
+  - `tokens_per_second`: Rate of token generation
+  - `bucket_capacity`: Maximum token capacity
+  - `pattern_window_size`: Window size for pattern detection
+  - `min_interval_variance`: Minimum interval variance
+  - `min_requests_for_check`: Minimum requests for pattern check
+  - `rate_limit_threshold`: Rate limit threshold
+
+### Health Check Configuration
+- `HEALTH_CHECK_CONFIG`: Health monitoring settings
+  - `interval`: Check interval in seconds
+  - `history_size`: Metrics history size
+  - `thresholds`: Warning and critical thresholds
 
 ## Development
 
 ### Running Tests
 
 ```bash
-# Run all tests
-pytest
+# Run all tests with coverage
+pytest tests/ -v --cov=src --cov-report=term-missing
 
 # Run specific test types
 pytest tests/unit
 pytest tests/integration
 pytest tests/e2e
-
-# Run with coverage
-pytest --cov=src tests/
 ```
 
-### Code Style
+### Code Style and Quality
 
-The project follows PEP 8 style guide. Use `black` for formatting and `flake8` for linting:
+The project follows strict code quality standards:
+- Black for code formatting
+- Flake8 for linting
+- MyPy for type checking
+- isort for import sorting
 
 ```bash
 # Format code
@@ -152,15 +211,21 @@ black src/ tests/
 
 # Check style
 flake8 src/ tests/
+
+# Type checking
+mypy src/
+
+# Sort imports
+isort src/ tests/
 ```
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+3. Make changes following the code style guide
+4. Add tests for new functionality
+5. Submit a pull request
 
 ## License
 
@@ -169,6 +234,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot)
-- [MongoDB](https://www.mongodb.com/)
+- [SQLAlchemy](https://www.sqlalchemy.org/)
 - [Redis](https://redis.io/)
-- [Selenium](https://www.selenium.dev/) 
+- [Celery](https://docs.celeryproject.org/)
+- [structlog](https://www.structlog.org/) 

@@ -123,12 +123,28 @@ class AppointmentManager:
         loop = self._get_event_loop()
         while not self._stop_event.is_set():
             try:
-                task = self.task_queue.get(timeout=1)
-                loop.run_until_complete(self._process_booking_task(task))
-                self.task_queue.task_done()
+                # Use a shorter timeout to avoid blocking shutdown
+                try:
+                    task = self.task_queue.get(timeout=1)
+                except TimeoutError:
+                    # No task available, just continue the loop
+                    continue
+                
+                try:
+                    # Process the booking task
+                    loop.run_until_complete(self._process_booking_task(task))
+                    self.task_queue.task_done()
+                except Exception as e:
+                    logger.error(f"Error processing booking task: {str(e)}", 
+                                 exc_info=True,
+                                 task=task)
+                    # Make sure to mark the task as done even if it fails
+                    self.task_queue.task_done()
             except Exception as e:
                 if not isinstance(e, TimeoutError):
-                    logger.error(f"Error in worker loop: {e}")
+                    logger.error(f"Error in worker loop: {str(e)}", exc_info=True)
+                # Add a small sleep to prevent CPU spinning on repeated errors
+                time.sleep(0.1)
                     
     async def check_appointments(self) -> None:
         """Check for available appointments."""
@@ -338,4 +354,4 @@ class AppointmentManager:
             self.logger.error(f"Error checking appointments: {e}")
 
 # Create a global appointment manager instance
-appointment_manager = AppointmentManager() 
+appointment_manager = AppointmentManager()

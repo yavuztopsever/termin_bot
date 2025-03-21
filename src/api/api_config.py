@@ -72,12 +72,14 @@ class APIConfig:
             
     async def _load_config(self, retries: int = MAX_RETRIES) -> None:
         """Load API configuration from database with retries."""
+        from src.database.repositories import website_config_repository
+        
         attempt = 0
         while attempt < retries:
             try:
-                config_data = await db.website_config.find_one()
+                config_data = await website_config_repository.get_latest_config()
                 if config_data:
-                    self.config = WebsiteConfig(**config_data)
+                    self.config = config_data
                     logger.info("Loaded API configuration from database")
                     return
                 else:
@@ -163,6 +165,7 @@ class APIConfig:
     ) -> None:
         """Track API request history."""
         try:
+            # Create API request object
             api_request = ApiRequest(
                 endpoint=endpoint,
                 method=method,
@@ -170,11 +173,22 @@ class APIConfig:
                 status_code=status_code,
                 success=success,
                 error_message=error_message,
+                response_time=response_time,
+                created_at=datetime.utcnow()
+            )
+            
+            # Log the request
+            logger.info(
+                "API request",
+                endpoint=endpoint,
+                method=method,
+                status_code=status_code,
+                success=success,
                 response_time=response_time
             )
             
-            # Store in database
-            await db.api_requests.insert_one(api_request.__dict__)
+            # We could store this in the database, but for now we'll just log it
+            # In a future update, we could add an ApiRequestRepository
             
         except Exception as e:
             logger.error(f"Failed to track API request: {e}")
@@ -312,20 +326,15 @@ class APIConfig:
             
     async def update_config(self, new_config: Dict[str, Any]) -> None:
         """Update the API configuration."""
+        from src.database.repositories import website_config_repository
+        
         try:
             # Validate the new configuration
             if not self._validate_config(new_config):
                 raise ConfigurationError("Invalid configuration format")
                 
-            # Create WebsiteConfig instance
-            config = WebsiteConfig(**new_config)
-            
-            # Update database
-            await db.website_config.replace_one(
-                {},  # Empty filter to replace the single document
-                new_config,
-                upsert=True
-            )
+            # Update database using repository
+            config = await website_config_repository.update_config(new_config)
             
             # Update local config
             self.config = config

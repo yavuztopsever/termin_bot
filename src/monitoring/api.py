@@ -1,6 +1,6 @@
 """Monitoring API endpoints."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, FastAPI
 from fastapi.responses import Response
 from prometheus_client import (
     generate_latest,
@@ -13,7 +13,14 @@ from prometheus_client import (
 from src.monitoring.health_check import health_monitor
 from src.utils.logger import logger
 
+# Create FastAPI app
+app = FastAPI(title="Monitoring API", description="API for monitoring system health and metrics")
+
+# Create router
 router = APIRouter()
+
+# Include router in app
+app.include_router(router)
 
 # Define Prometheus metrics
 REQUEST_LATENCY = Histogram(
@@ -124,4 +131,4 @@ async def detailed_status():
         return status
     except Exception as e:
         logger.error("Failed to get detailed status", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to get detailed status") 
+        raise HTTPException(status_code=500, detail="Failed to get detailed status")

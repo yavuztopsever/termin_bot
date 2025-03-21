@@ -32,40 +32,6 @@ from src.models import HealthMetrics
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class HealthMetrics:
-    """System health metrics."""
-    timestamp: float
-    cpu_usage: float
-    memory_usage: float
-    disk_usage: float
-    request_rate: float
-    error_rate: float
-    active_tasks: int
-    db_connection_healthy: bool
-    redis_connection_healthy: bool
-    request_success_rate: float
-    average_response_time: float
-    rate_limit_status: Dict[str, Any]
-    errors_last_hour: int
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert metrics to dictionary."""
-        return asdict(self)
-
-    def is_healthy(self) -> bool:
-        """Check if metrics indicate healthy system."""
-        return (
-            self.cpu_usage < HEALTH_CHECK_CONFIG["critical_cpu_threshold"] and
-            self.memory_usage < HEALTH_CHECK_CONFIG["critical_memory_threshold"] and
-            self.error_rate < HEALTH_CHECK_CONFIG["critical_error_rate"] and
-            self.db_connection_healthy and
-            self.redis_connection_healthy and
-            self.request_success_rate >= HEALTH_CHECK_CONFIG["min_success_rate"] and
-            self.average_response_time < HEALTH_CHECK_CONFIG["max_response_time"] and
-            self.errors_last_hour < HEALTH_CHECK_CONFIG["max_errors_per_hour"]
-        )
-
 class HealthMonitor:
     """Monitor system health metrics."""
 
@@ -82,6 +48,39 @@ class HealthMonitor:
         self.request_success = []
         self.errors = []
         self.active_tasks = 0
+        self.db_connection_healthy = True
+        self.redis_connection_healthy = True
+        
+    def record_request(self, duration: float, success: bool) -> None:
+        """
+        Record a request for metrics tracking.
+        
+        Args:
+            duration: Request duration in seconds
+            success: Whether the request was successful
+        """
+        now = time.time()
+        self.request_times.append(now)
+        self.request_success.append(success)
+        
+        # Prune old request data
+        cutoff = now - 3600  # Keep last hour
+        self.request_times = [t for t in self.request_times if t > cutoff]
+        self.request_success = self.request_success[-len(self.request_times):]
+        
+    def record_error(self, error: str) -> None:
+        """
+        Record an error for metrics tracking.
+        
+        Args:
+            error: Error message
+        """
+        now = time.time()
+        self.errors.append((now, error))
+        
+        # Prune old error data
+        cutoff = now - 3600  # Keep last hour
+        self.errors = [(t, e) for t, e in self.errors if t > cutoff]
 
     async def _store_metrics(self, metrics: HealthMetrics) -> None:
         """Store health metrics."""
@@ -92,12 +91,12 @@ class HealthMonitor:
 
     async def _prune_old_metrics(self) -> None:
         """Remove metrics older than retention period."""
-        now = datetime.utcnow()
-        retention = timedelta(hours=24)
+        now = datetime.utcnow().timestamp()
+        retention_seconds = 24 * 60 * 60  # 24 hours in seconds
         async with self._lock:
             self.metrics_history = [
                 m for m in self.metrics_history 
-                if now - m.timestamp < retention
+                if now - m.timestamp < retention_seconds
             ]
 
     async def start(self) -> None:
@@ -158,13 +157,14 @@ class HealthMonitor:
 
         # Create metrics
         metrics = HealthMetrics(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.utcnow().timestamp(),
             cpu_usage=cpu_usage,
             memory_usage=memory_usage,
             disk_usage=disk_usage,
             request_rate=request_rate,
             error_rate=len(self.errors) / 60.0,  # errors per second
             active_tasks=self.active_tasks,
+            db_connection_healthy=self.db_connection_healthy,
             redis_connection_healthy=redis_healthy,
             request_success_rate=success_rate,
             average_response_time=avg_response_time,
@@ -263,8 +263,18 @@ health_monitor = HealthMonitor()
 
 async def start_health_monitoring():
     """Start global health monitoring."""
-    await health_monitor.start()
+    # Create a background task for health monitoring
+    asyncio.create_task(_run_health_monitoring())
+    logger.info("Health monitoring started")
 
 async def stop_health_monitoring():
     """Stop global health monitoring."""
-    await health_monitor.stop() 
+    health_monitor._running = False
+    logger.info("Health monitoring stopped")
+
+async def _run_health_monitoring():
+    """Run health monitoring in the background."""
+    try:
+        await health_monitor.start()
+    except Exception as e:
+        logger.error(f"Error in health monitoring: {e}")

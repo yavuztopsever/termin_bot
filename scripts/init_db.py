@@ -21,9 +21,20 @@ async def init_db():
         # Create a new database instance
         db = AsyncDatabase()
         
-        # Connect to the database
+        # Connect to the database and create tables
         await db.connect()
-        logger.info("Successfully connected to database")
+        logger.info("Successfully connected to database and created tables")
+        
+        # Verify tables were created
+        async with db.async_session() as session:
+            # Try a simple query to verify tables exist
+            try:
+                from sqlalchemy import text
+                result = await session.execute(text("SELECT name FROM sqlite_master WHERE type='table';"))
+                tables = result.scalars().all()
+                logger.info(f"Created tables: {', '.join(tables)}")
+            except Exception as e:
+                logger.error(f"Error verifying tables: {e}")
         
         # Close the connection
         await db.close()
@@ -35,4 +46,4 @@ async def init_db():
 
 if __name__ == "__main__":
     # Run the initialization
-    asyncio.run(init_db()) 
+    asyncio.run(init_db())
