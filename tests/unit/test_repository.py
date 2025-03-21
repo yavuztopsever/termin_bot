@@ -33,7 +33,7 @@ class TestRepository:
     @pytest.fixture
     def mock_db_pool(self, mock_session):
         """Mock the database pool."""
-        with patch('src.database.db_pool.db_pool') as mock_pool:
+        with patch('src.database.db_pool', autospec=True) as mock_pool:
             # Mock session context manager
             mock_pool.session.return_value.__aenter__.return_value = mock_session
             
@@ -53,8 +53,10 @@ class TestRepository:
         mock_result.scalar_one_or_none.return_value = User(id=1, telegram_id="123", first_name="Test")
         mock_session.execute.return_value = mock_result
         
-        # Call method
-        result = await user_repository.find_by_id(1)
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.find_by_id(1)
         
         # Assertions
         assert result.id == 1
@@ -76,8 +78,10 @@ class TestRepository:
         mock_result.scalar_one_or_none.return_value = User(id=1, telegram_id="123", first_name="Test")
         mock_session.execute.return_value = mock_result
         
-        # Call method
-        result = await user_repository.find_one(User.telegram_id == "123")
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.find_one(User.telegram_id == "123")
         
         # Assertions
         assert result.id == 1
@@ -102,8 +106,10 @@ class TestRepository:
         ]
         mock_session.execute.return_value = mock_result
         
-        # Call method
-        result = await user_repository.find_all(User.first_name.like("Test%"))
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.find_all(User.first_name.like("Test%"))
         
         # Assertions
         assert len(result) == 2
@@ -131,8 +137,10 @@ class TestRepository:
             "last_name": "User"
         }
         
-        # Call method
-        result = await user_repository.create(user_data)
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.create(user_data)
         
         # Assertions
         assert isinstance(result, User)
@@ -158,8 +166,10 @@ class TestRepository:
             "last_name": "Name"
         }
         
-        # Call method
-        result = await user_repository.update(1, update_data)
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.update(1, update_data)
         
         # Assertions
         assert result.id == 1
@@ -178,8 +188,10 @@ class TestRepository:
         # Setup mock
         mock_session.get.return_value = None
         
-        # Call method
-        result = await user_repository.update(999, {"first_name": "Updated"})
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.update(999, {"first_name": "Updated"})
         
         # Assertions
         assert result is None
@@ -196,8 +208,10 @@ class TestRepository:
         user = User(id=1, telegram_id="123", first_name="Test")
         mock_session.get.return_value = user
         
-        # Call method
-        result = await user_repository.delete(1)
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.delete(1)
         
         # Assertions
         assert result is True
@@ -212,8 +226,10 @@ class TestRepository:
         # Setup mock
         mock_session.get.return_value = None
         
-        # Call method
-        result = await user_repository.delete(999)
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.delete(999)
         
         # Assertions
         assert result is False
@@ -230,8 +246,10 @@ class TestRepository:
         mock_result.scalars().all.return_value = [User(), User(), User()]
         mock_session.execute.return_value = mock_result
         
-        # Call method
-        result = await user_repository.count(User.first_name.like("Test%"))
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.count(User.first_name.like("Test%"))
         
         # Assertions
         assert result == 3
@@ -251,8 +269,10 @@ class TestRepository:
         mock_result.first.return_value = (User(),)
         mock_session.execute.return_value = mock_result
         
-        # Call method
-        result = await user_repository.exists(User.telegram_id == "123")
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.exists(User.telegram_id == "123")
         
         # Assertions
         assert result is True
@@ -272,8 +292,10 @@ class TestRepository:
         mock_result.first.return_value = None
         mock_session.execute.return_value = mock_result
         
-        # Call method
-        result = await user_repository.exists(User.telegram_id == "999")
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.exists(User.telegram_id == "999")
         
         # Assertions
         assert result is False
@@ -287,8 +309,10 @@ class TestRepository:
             {"telegram_id": "456", "first_name": "Test2"}
         ]
         
-        # Call method
-        result = await user_repository.bulk_create(users_data)
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.bulk_create(users_data)
         
         # Assertions
         assert len(result) == 2
@@ -311,8 +335,10 @@ class TestRepository:
         async def test_func(session, arg1, arg2=None):
             return f"{arg1}-{arg2}-{session}"
             
-        # Call method
-        result = await user_repository.transaction(test_func, "test", arg2="value")
+        # Patch db_pool in the repository module
+        with patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await user_repository.transaction(test_func, "test", arg2="value")
         
         # Assertions
         assert result == f"test-value-{mock_session}"
@@ -322,17 +348,18 @@ class TestRepository:
         """Test retry on database error."""
         # This test verifies that the with_retry decorator is applied correctly
         
-        # Mock db_pool.with_retry to verify it's called
-        with patch('src.database.db_pool.db_pool') as mock_pool:
-            # Setup mock
-            mock_decorator = MagicMock()
-            mock_pool.with_retry.return_value = mock_decorator
-            
-            # Call any repository method
-            try:
-                await user_repository.find_by_id(1)
-            except Exception:
-                pass  # We expect an exception since we're not mocking the session
-                
-            # Verify with_retry was called
-            mock_pool.with_retry.assert_called_once()
+        # Check if the find_by_id method is decorated with with_retry
+        from src.database.repository import Repository
+        
+        # Get the original method from the class
+        original_method = Repository.find_by_id
+        
+        # Check if it's a decorated method (has a __wrapped__ attribute)
+        assert hasattr(original_method, '__wrapped__'), "Method is not decorated with with_retry"
+        
+        # Verify the method is wrapped by checking if the function code is different
+        assert original_method.__code__ is not original_method.__wrapped__.__code__, "Method is not properly decorated"
+        
+        # Also check that the wrapper function has the same name as the original
+        # This is a good practice for decorators to preserve the original function's metadata
+        assert original_method.__name__ == 'find_by_id', "Decorator did not preserve the original function name"

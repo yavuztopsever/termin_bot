@@ -39,7 +39,7 @@ class TestUserRepository:
     @pytest.fixture
     def mock_db_pool(self, mock_session):
         """Mock the database pool."""
-        with patch('src.database.db_pool.db_pool') as mock_pool:
+        with patch('src.database.db_pool', autospec=True) as mock_pool:
             # Mock session context manager
             mock_pool.session.return_value.__aenter__.return_value = mock_session
             
@@ -59,8 +59,11 @@ class TestUserRepository:
         mock_result.scalar_one_or_none.return_value = User(id=1, telegram_id="123", first_name="Test")
         mock_session.execute.return_value = mock_result
         
-        # Call method
-        result = await repository.find_by_telegram_id("123")
+        # Need to patch both the repository module and the parent repository module
+        with patch('src.database.repositories.db_pool', mock_db_pool), \
+             patch('src.database.repository.db_pool', mock_db_pool):
+            # Call method
+            result = await repository.find_by_telegram_id("123")
         
         # Assertions
         assert result.id == 1
@@ -85,8 +88,9 @@ class TestUserRepository:
         ]
         mock_session.execute.return_value = mock_result
         
-        # Call method
+        # Patch db_pool in the repositories module
         with patch('src.database.repositories.db_pool', mock_db_pool):
+            # Call method
             result = await repository.get_users_with_active_subscriptions()
         
         # Assertions
@@ -129,7 +133,7 @@ class TestSubscriptionRepository:
     @pytest.fixture
     def mock_db_pool(self, mock_session):
         """Mock the database pool."""
-        with patch('src.database.db_pool.db_pool') as mock_pool:
+        with patch('src.database.db_pool', autospec=True) as mock_pool:
             # Mock session context manager
             mock_pool.session.return_value.__aenter__.return_value = mock_session
             
@@ -152,8 +156,10 @@ class TestSubscriptionRepository:
         ]
         mock_session.execute.return_value = mock_result
         
-        # Call method
-        result = await repository.find_active_subscriptions()
+        # Patch db_pool in the repositories module
+        with patch('src.database.repositories.db_pool', mock_db_pool):
+            # Call method
+            result = await repository.find_active_subscriptions()
         
         # Assertions
         assert len(result) == 2
@@ -180,8 +186,10 @@ class TestSubscriptionRepository:
         subscription = Subscription(id=1, user_id=1, service_id="service1", status="active")
         mock_session.get.return_value = subscription
         
-        # Call method
-        result = await repository.deactivate_subscription(1)
+        # Patch db_pool in the repositories module
+        with patch('src.database.repositories.db_pool', mock_db_pool):
+            # Call method
+            result = await repository.deactivate_subscription(1)
         
         # Assertions
         assert result.id == 1
@@ -216,7 +224,7 @@ class TestWebsiteConfigRepository:
     @pytest.fixture
     def mock_db_pool(self, mock_session):
         """Mock the database pool."""
-        with patch('src.database.db_pool.db_pool') as mock_pool:
+        with patch('src.database.db_pool', autospec=True) as mock_pool:
             # Mock session context manager
             mock_pool.session.return_value.__aenter__.return_value = mock_session
             
@@ -243,8 +251,9 @@ class TestWebsiteConfigRepository:
         )
         mock_session.execute.return_value = mock_result
         
-        # Call method
+        # Patch db_pool in the repositories module
         with patch('src.database.repositories.db_pool', mock_db_pool):
+            # Call method
             result = await repository.get_latest_config()
         
         # Assertions
@@ -285,12 +294,14 @@ class TestWebsiteConfigRepository:
             "api_endpoints": {"check": "/api/v2/check", "book": "/api/v2/book"}
         }
         
-        # Mock get_latest_config to return existing config
-        with patch.object(repository, 'get_latest_config', return_value=existing_config):
-            # Mock update to return updated config
-            with patch.object(repository, 'update', return_value=WebsiteConfig(id=1, **config_data)):
-                # Call method
-                result = await repository.update_config(config_data)
+        # Patch db_pool in the repositories module
+        with patch('src.database.repositories.db_pool', mock_db_pool):
+            # Mock get_latest_config to return existing config
+            with patch.object(repository, 'get_latest_config', return_value=existing_config):
+                # Mock update to return updated config
+                with patch.object(repository, 'update', return_value=WebsiteConfig(id=1, **config_data)):
+                    # Call method
+                    result = await repository.update_config(config_data)
         
         # Assertions
         assert result.id == 1
@@ -310,12 +321,14 @@ class TestWebsiteConfigRepository:
             "api_endpoints": {"check": "/api/check", "book": "/api/book"}
         }
         
-        # Mock get_latest_config to return None
-        with patch.object(repository, 'get_latest_config', return_value=None):
-            # Mock create to return new config
-            with patch.object(repository, 'create', return_value=WebsiteConfig(id=1, **config_data)):
-                # Call method
-                result = await repository.update_config(config_data)
+        # Patch db_pool in the repositories module
+        with patch('src.database.repositories.db_pool', mock_db_pool):
+            # Mock get_latest_config to return None
+            with patch.object(repository, 'get_latest_config', return_value=None):
+                # Mock create to return new config
+                with patch.object(repository, 'create', return_value=WebsiteConfig(id=1, **config_data)):
+                    # Call method
+                    result = await repository.update_config(config_data)
         
         # Assertions
         assert result.id == 1

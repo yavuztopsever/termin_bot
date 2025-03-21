@@ -10,13 +10,16 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 import threading
 from contextvars import ContextVar
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 
 from src.config.config import (
     LOG_LEVEL,
     LOG_FORMAT,
     LOG_FILE,
     LOG_MAX_BYTES,
-    LOG_BACKUP_COUNT
+    LOG_BACKUP_COUNT,
+    config
 )
 from src.utils.json_encoder import CustomJSONEncoder
 
@@ -60,19 +63,49 @@ class StructuredLogger(logging.Logger):
         json_msg = json.dumps(log_data, cls=CustomJSONEncoder)
         super()._log(level, json_msg, args, exc_info, extra, stack_info)
 
-def setup_logger(name: str) -> logging.Logger:
-    """Set up logger with structured logging."""
-    # Register custom logger class
-    logging.setLoggerClass(StructuredLogger)
-
+def setup_logger(
+    name: str,
+    level: Optional[str] = None,
+    log_file: Optional[str] = None,
+    format_string: Optional[str] = None
+) -> logging.Logger:
+    """Set up a logger with the specified configuration."""
+    # Create logger
     logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-
+    
+    # Set level
+    logger.setLevel(level or config["log_level"])
+    
+    # Create formatters
+    formatter = logging.Formatter(
+        format_string or config["log_format"]
+    )
+    
+    # Create handlers
+    handlers = []
+    
     # Console handler
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setFormatter(JsonFormatter())
-    logger.addHandler(console_handler)
-
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    handlers.append(console_handler)
+    
+    # File handler
+    if log_file:
+        # Create logs directory if it doesn't exist
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        handlers.append(file_handler)
+    
+    # Remove existing handlers
+    logger.handlers = []
+    
+    # Add new handlers
+    for handler in handlers:
+        logger.addHandler(handler)
+        
     return logger
 
 class JsonFormatter(logging.Formatter):

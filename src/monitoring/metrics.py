@@ -1,497 +1,217 @@
-"""Metrics collector for monitoring application performance."""
-
+from typing import Dict, Any, Optional
 import time
-import os
-import psutil
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
-import threading
-import logging
-from collections import defaultdict, deque
+from prometheus_client import Counter, Gauge, Histogram, Summary
+from prometheus_client.exposition import start_http_server
 
+from src.config.config import PROMETHEUS_PORT, ENABLE_METRICS
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 
-class MetricsCollector:
-    """Collects and exposes metrics for monitoring."""
+class MetricsManager:
+    """Manager for application metrics."""
     
-    _instance = None
-    _lock = threading.Lock()
-    
-    def __new__(cls):
-        """Singleton pattern to ensure only one metrics collector instance."""
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super(MetricsCollector, cls).__new__(cls)
-                cls._instance._initialized = False
-        return cls._instance
-        
     def __init__(self):
-        """Initialize metrics collector."""
-        if self._initialized:
+        """Initialize the metrics manager."""
+        self._initialized = False
+        self._metrics: Dict[str, Any] = {}
+        
+    async def initialize(self) -> None:
+        """Initialize metrics and start Prometheus server."""
+        try:
+            if ENABLE_METRICS:
+                # Initialize Prometheus metrics
+                self._initialize_prometheus_metrics()
+                
+                # Start Prometheus HTTP server
+                start_http_server(PROMETHEUS_PORT)
+                logger.info(f"Started Prometheus metrics server on port {PROMETHEUS_PORT}")
+                
+            self._initialized = True
+            
+        except Exception as e:
+            logger.error("Failed to initialize metrics manager", error=str(e))
+            
+    def _initialize_prometheus_metrics(self) -> None:
+        """Initialize Prometheus metrics."""
+        # API metrics
+        self._metrics["api_requests_total"] = Counter(
+            "api_requests_total",
+            "Total number of API requests",
+            ["endpoint", "method", "status"]
+        )
+        
+        self._metrics["api_request_duration_seconds"] = Histogram(
+            "api_request_duration_seconds",
+            "API request duration in seconds",
+            ["endpoint", "method"],
+            buckets=[0.1, 0.5, 1.0, 2.0, 5.0]
+        )
+        
+        # Appointment metrics
+        self._metrics["appointments_total"] = Counter(
+            "appointments_total",
+            "Total number of appointments",
+            ["status"]
+        )
+        
+        self._metrics["appointment_booking_duration_seconds"] = Histogram(
+            "appointment_booking_duration_seconds",
+            "Appointment booking duration in seconds",
+            buckets=[0.5, 1.0, 2.0, 5.0, 10.0]
+        )
+        
+        # Rate limiting metrics
+        self._metrics["rate_limit_requests_total"] = Counter(
+            "rate_limit_requests_total",
+            "Total number of rate-limited requests",
+            ["endpoint"]
+        )
+        
+        self._metrics["rate_limit_exceeded_total"] = Counter(
+            "rate_limit_exceeded_total",
+            "Total number of rate limit exceeded events",
+            ["endpoint"]
+        )
+        
+        # Database metrics
+        self._metrics["db_operations_total"] = Counter(
+            "db_operations_total",
+            "Total number of database operations",
+            ["operation", "model"]
+        )
+        
+        self._metrics["db_operation_duration_seconds"] = Histogram(
+            "db_operation_duration_seconds",
+            "Database operation duration in seconds",
+            ["operation", "model"],
+            buckets=[0.01, 0.05, 0.1, 0.5, 1.0]
+        )
+        
+        # Cache metrics
+        self._metrics["cache_hits_total"] = Counter(
+            "cache_hits_total",
+            "Total number of cache hits",
+            ["cache_type"]
+        )
+        
+        self._metrics["cache_misses_total"] = Counter(
+            "cache_misses_total",
+            "Total number of cache misses",
+            ["cache_type"]
+        )
+        
+        # Error metrics
+        self._metrics["errors_total"] = Counter(
+            "errors_total",
+            "Total number of errors",
+            ["type", "component"]
+        )
+        
+        # System metrics
+        self._metrics["memory_usage_bytes"] = Gauge(
+            "memory_usage_bytes",
+            "Current memory usage in bytes"
+        )
+        
+        self._metrics["cpu_usage_percent"] = Gauge(
+            "cpu_usage_percent",
+            "Current CPU usage percentage"
+        )
+        
+        # Health check metrics
+        self._metrics["health_check_duration_seconds"] = Summary(
+            "health_check_duration_seconds",
+            "Health check duration in seconds",
+            ["component"]
+        )
+        
+    def increment(self, metric_name: str, **labels) -> None:
+        """Increment a counter metric."""
+        if not self._initialized or not ENABLE_METRICS:
             return
             
-        self._initialized = True
-        self._lock = threading.Lock()
-        self._counters = defaultdict(int)
-        self._gauges = {}
-        self._histograms = defaultdict(list)
-        self._timers = {}
-        
-        # Store recent values for time series metrics
-        self._time_series = defaultdict(lambda: deque(maxlen=1000))
-        
-        # Store recent errors
-        self._errors = deque(maxlen=100)
-        
-        # Store recent API requests
-        self._api_requests = deque(maxlen=1000)
-        
-        # Store recent notifications
-        self._notifications = deque(maxlen=100)
-        
-        # Store recent booking attempts
-        self._booking_attempts = deque(maxlen=100)
-        
-        # Initialize common metrics
-        self._counters["total_requests"] = 0
-        self._counters["successful_requests"] = 0
-        self._counters["failed_requests"] = 0
-        self._counters["total_bookings"] = 0
-        self._counters["successful_bookings"] = 0
-        self._counters["failed_bookings"] = 0
-        self._counters["timeout_bookings"] = 0
-        self._counters["total_notifications"] = 0
-        self._counters["successful_notifications"] = 0
-        self._counters["failed_notifications"] = 0
-        
-        # Initialize gauges
-        self._gauges["active_tasks"] = 0
-        self._gauges["active_bookings"] = 0
-        self._gauges["active_notifications"] = 0
-        
-        logger.info("Initialized metrics collector")
-        
-    def increment(self, name: str, value: int = 1) -> None:
-        """
-        Increment a counter metric.
-        
-        Args:
-            name: Metric name
-            value: Value to increment by (default: 1)
-        """
-        with self._lock:
-            self._counters[name] += value
-            
-    def decrement(self, name: str, value: int = 1) -> None:
-        """
-        Decrement a counter metric.
-        
-        Args:
-            name: Metric name
-            value: Value to decrement by (default: 1)
-        """
-        with self._lock:
-            self._counters[name] -= value
-            
-    def set_gauge(self, name: str, value: float) -> None:
-        """
-        Set a gauge metric.
-        
-        Args:
-            name: Metric name
-            value: Gauge value
-        """
-        with self._lock:
-            self._gauges[name] = value
-            
-    def observe(self, name: str, value: float) -> None:
-        """
-        Observe a value for a histogram metric.
-        
-        Args:
-            name: Metric name
-            value: Observed value
-        """
-        with self._lock:
-            self._histograms[name].append(value)
-            # Keep only the last 1000 observations
-            if len(self._histograms[name]) > 1000:
-                self._histograms[name] = self._histograms[name][-1000:]
-                
-    def start_timer(self, name: str) -> None:
-        """
-        Start a timer for measuring durations.
-        
-        Args:
-            name: Timer name
-        """
-        self._timers[name] = time.time()
-        
-    def stop_timer(self, name: str) -> Optional[float]:
-        """
-        Stop a timer and return the elapsed time.
-        
-        Args:
-            name: Timer name
-            
-        Returns:
-            Elapsed time in seconds, or None if timer not found
-        """
-        if name not in self._timers:
-            return None
-            
-        elapsed = time.time() - self._timers[name]
-        del self._timers[name]
-        
-        # Store in histogram
-        self.observe(f"{name}_duration", elapsed)
-        
-        return elapsed
-        
-    def record_time_series(self, name: str, value: float) -> None:
-        """
-        Record a value for a time series metric.
-        
-        Args:
-            name: Metric name
-            value: Observed value
-        """
-        with self._lock:
-            self._time_series[name].append((datetime.utcnow(), value))
-            
-    def record_error(self, error: Dict[str, Any]) -> None:
-        """
-        Record an error.
-        
-        Args:
-            error: Error details
-        """
-        with self._lock:
-            self._errors.append({
-                "timestamp": datetime.utcnow(),
-                **error
-            })
-            
-    def record_api_request(self, request: Dict[str, Any]) -> None:
-        """
-        Record an API request.
-        
-        Args:
-            request: API request details
-        """
-        with self._lock:
-            self._api_requests.append({
-                "timestamp": datetime.utcnow(),
-                **request
-            })
-            
-    def record_notification(self, notification: Dict[str, Any]) -> None:
-        """
-        Record a notification.
-        
-        Args:
-            notification: Notification details
-        """
-        with self._lock:
-            self._notifications.append({
-                "timestamp": datetime.utcnow(),
-                **notification
-            })
-            
-    def record_booking_attempt(self, booking: Dict[str, Any]) -> None:
-        """
-        Record a booking attempt.
-        
-        Args:
-            booking: Booking attempt details
-        """
-        with self._lock:
-            self._booking_attempts.append({
-                "timestamp": datetime.utcnow(),
-                **booking
-            })
-            
-    def get_counter(self, name: str) -> int:
-        """
-        Get the value of a counter metric.
-        
-        Args:
-            name: Metric name
-            
-        Returns:
-            Counter value
-        """
-        return self._counters.get(name, 0)
-        
-    def get_gauge(self, name: str) -> float:
-        """
-        Get the value of a gauge metric.
-        
-        Args:
-            name: Metric name
-            
-        Returns:
-            Gauge value
-        """
-        return self._gauges.get(name, 0.0)
-        
-    def get_histogram(self, name: str) -> List[float]:
-        """
-        Get the values of a histogram metric.
-        
-        Args:
-            name: Metric name
-            
-        Returns:
-            List of observed values
-        """
-        return self._histograms.get(name, [])
-        
-    def get_histogram_stats(self, name: str) -> Dict[str, float]:
-        """
-        Get statistics for a histogram metric.
-        
-        Args:
-            name: Metric name
-            
-        Returns:
-            Dictionary with min, max, avg, p50, p90, p95, p99 statistics
-        """
-        values = self.get_histogram(name)
-        if not values:
-            return {
-                "min": 0.0,
-                "max": 0.0,
-                "avg": 0.0,
-                "p50": 0.0,
-                "p90": 0.0,
-                "p95": 0.0,
-                "p99": 0.0
-            }
-            
-        values.sort()
-        return {
-            "min": values[0],
-            "max": values[-1],
-            "avg": sum(values) / len(values),
-            "p50": values[int(len(values) * 0.5)],
-            "p90": values[int(len(values) * 0.9)],
-            "p95": values[int(len(values) * 0.95)],
-            "p99": values[int(len(values) * 0.99)]
-        }
-        
-    def get_time_series(self, name: str, since: Optional[datetime] = None) -> List[tuple]:
-        """
-        Get time series data for a metric.
-        
-        Args:
-            name: Metric name
-            since: Optional timestamp to filter data
-            
-        Returns:
-            List of (timestamp, value) tuples
-        """
-        data = list(self._time_series.get(name, []))
-        if since:
-            data = [(ts, val) for ts, val in data if ts >= since]
-        return data
-        
-    def get_errors(self, since: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        """
-        Get recorded errors.
-        
-        Args:
-            since: Optional timestamp to filter errors
-            
-        Returns:
-            List of error records
-        """
-        errors = list(self._errors)
-        if since:
-            errors = [e for e in errors if e["timestamp"] >= since]
-        return errors
-        
-    def get_api_requests(self, since: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        """
-        Get recorded API requests.
-        
-        Args:
-            since: Optional timestamp to filter requests
-            
-        Returns:
-            List of API request records
-        """
-        requests = list(self._api_requests)
-        if since:
-            requests = [r for r in requests if r["timestamp"] >= since]
-        return requests
-        
-    def get_notifications(self, since: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        """
-        Get recorded notifications.
-        
-        Args:
-            since: Optional timestamp to filter notifications
-            
-        Returns:
-            List of notification records
-        """
-        notifications = list(self._notifications)
-        if since:
-            notifications = [n for n in notifications if n["timestamp"] >= since]
-        return notifications
-        
-    def get_booking_attempts(self, since: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        """
-        Get recorded booking attempts.
-        
-        Args:
-            since: Optional timestamp to filter booking attempts
-            
-        Returns:
-            List of booking attempt records
-        """
-        bookings = list(self._booking_attempts)
-        if since:
-            bookings = [b for b in bookings if b["timestamp"] >= since]
-        return bookings
-        
-    def get_all_metrics(self) -> Dict[str, Any]:
-        """
-        Get all metrics.
-        
-        Returns:
-            Dictionary with all metrics
-        """
-        with self._lock:
-            return {
-                "counters": dict(self._counters),
-                "gauges": dict(self._gauges),
-                "histograms": {
-                    name: self.get_histogram_stats(name)
-                    for name in self._histograms
-                },
-                "errors_count": len(self._errors),
-                "api_requests_count": len(self._api_requests),
-                "notifications_count": len(self._notifications),
-                "booking_attempts_count": len(self._booking_attempts)
-            }
-            
-    def reset(self) -> None:
-        """Reset all metrics."""
-        with self._lock:
-            self._counters = defaultdict(int)
-            self._gauges = {}
-            self._histograms = defaultdict(list)
-            self._timers = {}
-            self._time_series = defaultdict(lambda: deque(maxlen=1000))
-            self._errors = deque(maxlen=100)
-            self._api_requests = deque(maxlen=1000)
-            self._notifications = deque(maxlen=100)
-            self._booking_attempts = deque(maxlen=100)
-
-class MetricsManager(MetricsCollector):
-    """Extended metrics collector with system metrics functionality."""
-    
-    def __init__(self):
-        """Initialize metrics manager."""
-        super().__init__()
-        self._process = psutil.Process(os.getpid())
-        self._health_metrics = {}
-        
-    def update_health_metrics(self, metrics):
-        """
-        Update health metrics from the health monitor.
-        
-        Args:
-            metrics: Health metrics object
-        """
         try:
-            if hasattr(metrics, 'to_dict'):
-                self._health_metrics = metrics.to_dict()
-            elif isinstance(metrics, dict):
-                self._health_metrics = metrics
-            else:
-                self._health_metrics = {
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "error": "Invalid metrics format"
-                }
-                
-            # Update gauges based on health metrics
-            if isinstance(self._health_metrics, dict):
-                if "cpu_usage" in self._health_metrics:
-                    self.set_gauge("cpu_usage", self._health_metrics["cpu_usage"])
-                if "memory_usage" in self._health_metrics:
-                    self.set_gauge("memory_usage", self._health_metrics["memory_usage"])
-                if "disk_usage" in self._health_metrics:
-                    self.set_gauge("disk_usage", self._health_metrics["disk_usage"])
-                if "request_rate" in self._health_metrics:
-                    self.set_gauge("request_rate", self._health_metrics["request_rate"])
-                if "error_rate" in self._health_metrics:
-                    self.set_gauge("error_rate", self._health_metrics["error_rate"])
-                    
+            if metric_name in self._metrics:
+                self._metrics[metric_name].labels(**labels).inc()
         except Exception as e:
-            logger.error(f"Error updating health metrics: {str(e)}")
-        
-    async def get_system_metrics(self) -> Dict[str, Any]:
-        """
-        Get system metrics including CPU, memory, and application metrics.
-        
-        Returns:
-            Dictionary with system metrics
-        """
+            logger.error(f"Failed to increment metric {metric_name}", error=str(e))
+            
+    def observe(self, metric_name: str, value: float, **labels) -> None:
+        """Observe a value for a histogram or summary metric."""
+        if not self._initialized or not ENABLE_METRICS:
+            return
+            
         try:
-            # Get CPU and memory usage
-            cpu_usage = psutil.cpu_percent()
-            memory_usage = psutil.virtual_memory().percent
-            process_cpu = self._process.cpu_percent()
-            process_memory = self._process.memory_percent()
-            
-            # Get application metrics
-            app_metrics = self.get_all_metrics()
-            
-            # Calculate error rate
-            total_requests = self.get_counter("total_requests")
-            failed_requests = self.get_counter("failed_requests")
-            error_rate = (failed_requests / total_requests) if total_requests > 0 else 0
-            
-            # Combine metrics
-            metrics = {
-                "timestamp": datetime.utcnow().isoformat(),
-                "cpu_usage": cpu_usage,
-                "memory_usage": memory_usage,
-                "process_cpu": process_cpu,
-                "process_memory": process_memory,
-                "request_count": total_requests,
-                "error_count": failed_requests,
-                "error_rate": error_rate,
-                "active_users": self.get_gauge("active_users"),
-                "subscription_count": self.get_gauge("active_subscriptions"),
-                "booking_success_rate": self.get_gauge("booking_success_rate"),
-                "response_times": {
-                    name: stats for name, stats in app_metrics.get("histograms", {}).items()
-                    if name.endswith("_duration")
-                }
-            }
-            
-            # Add health metrics if available
-            if self._health_metrics:
-                metrics["health"] = self._health_metrics
-                
-            return metrics
-            
+            if metric_name in self._metrics:
+                self._metrics[metric_name].labels(**labels).observe(value)
         except Exception as e:
-            logger.error(f"Error getting system metrics: {str(e)}")
-            return {
-                "timestamp": datetime.utcnow().isoformat(),
-                "cpu_usage": 0,
-                "memory_usage": 0,
-                "error_rate": 0,
-                "error": str(e)
-            }
+            logger.error(f"Failed to observe metric {metric_name}", error=str(e))
+            
+    def set(self, metric_name: str, value: float, **labels) -> None:
+        """Set a value for a gauge metric."""
+        if not self._initialized or not ENABLE_METRICS:
+            return
+            
+        try:
+            if metric_name in self._metrics:
+                self._metrics[metric_name].labels(**labels).set(value)
+        except Exception as e:
+            logger.error(f"Failed to set metric {metric_name}", error=str(e))
+            
+    def record_api_request(
+        self,
+        endpoint: str,
+        method: str,
+        status: int,
+        duration: float
+    ) -> None:
+        """Record an API request."""
+        self.increment("api_requests_total", endpoint=endpoint, method=method, status=status)
+        self.observe("api_request_duration_seconds", duration, endpoint=endpoint, method=method)
+        
+    def record_appointment(self, status: str, booking_duration: Optional[float] = None) -> None:
+        """Record an appointment."""
+        self.increment("appointments_total", status=status)
+        if booking_duration is not None:
+            self.observe("appointment_booking_duration_seconds", booking_duration)
+            
+    def record_rate_limit(self, endpoint: str, exceeded: bool = False) -> None:
+        """Record a rate limit event."""
+        if exceeded:
+            self.increment("rate_limit_exceeded_total", endpoint=endpoint)
+        else:
+            self.increment("rate_limit_requests_total", endpoint=endpoint)
+            
+    def record_db_operation(
+        self,
+        operation: str,
+        model: str,
+        duration: float
+    ) -> None:
+        """Record a database operation."""
+        self.increment("db_operations_total", operation=operation, model=model)
+        self.observe("db_operation_duration_seconds", duration, operation=operation, model=model)
+        
+    def record_cache_event(self, cache_type: str, hit: bool) -> None:
+        """Record a cache event."""
+        if hit:
+            self.increment("cache_hits_total", cache_type=cache_type)
+        else:
+            self.increment("cache_misses_total", cache_type=cache_type)
+            
+    def record_error(self, error_type: str, component: str) -> None:
+        """Record an error."""
+        self.increment("errors_total", type=error_type, component=component)
+        
+    def record_system_metrics(self, memory_bytes: int, cpu_percent: float) -> None:
+        """Record system metrics."""
+        self.set("memory_usage_bytes", memory_bytes)
+        self.set("cpu_usage_percent", cpu_percent)
+        
+    def record_health_check(self, component: str, duration: float) -> None:
+        """Record a health check."""
+        self.observe("health_check_duration_seconds", duration, component=component)
 
-# Create the metrics manager instance
-metrics_manager = MetricsManager()
-metrics_collector = metrics_manager  # Alias for backward compatibility
+# Create singleton instance
+metrics_manager = MetricsManager() 

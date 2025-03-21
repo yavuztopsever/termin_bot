@@ -1,333 +1,510 @@
-"""Configuration settings for the application."""
-
 import os
+from typing import Dict, Any, Optional
 from dotenv import load_dotenv
-from typing import Dict, Any, List
-import asyncio
+from pathlib import Path
+from dataclasses import dataclass
+from datetime import timedelta
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# Environment
-ENV = os.getenv("ENV", "development")
-DEBUG = os.getenv("DEBUG", "true").lower() == "true"
+@dataclass
+class APIConfig:
+    """API configuration settings."""
+    base_url: str
+    timeout: float
+    rate_limit: int
+    rate_limit_period: float
+    retries: int
+    retry_delay: float
+    
+@dataclass
+class DatabaseConfig:
+    """Database configuration settings."""
+    host: str
+    port: int
+    database: str
+    user: str
+    password: str
+    pool_size: int
+    pool_timeout: float
+    query_timeout: float
+    
+@dataclass
+class CacheConfig:
+    """Cache configuration settings."""
+    host: str
+    port: int
+    database: int
+    ttl: int
+    max_size: int
+    cleanup_interval: float
+    
+@dataclass
+class MonitoringConfig:
+    """Monitoring configuration settings."""
+    prometheus_port: int
+    prometheus_path: str
+    health_check_interval: float
+    health_check_timeout: float
+    metrics_retention_days: int
+    alert_cooldown: float
+    dashboard_port: int
+    dashboard_refresh_interval: float
+    
+@dataclass
+class LoggingConfig:
+    """Logging configuration settings."""
+    level: str
+    format: str
+    file: Optional[str]
+    max_size: int
+    backup_count: int
+    
+@dataclass
+class Config:
+    """Main configuration class."""
+    api: APIConfig
+    database: DatabaseConfig
+    cache: CacheConfig
+    monitoring: MonitoringConfig
+    logging: LoggingConfig
+    
+    @classmethod
+    def from_env(cls) -> 'Config':
+        """Create configuration from environment variables."""
+        return cls(
+            api=APIConfig(
+                base_url=os.getenv('API_BASE_URL', 'https://api.example.com'),
+                timeout=float(os.getenv('API_TIMEOUT', '30.0')),
+                rate_limit=int(os.getenv('API_RATE_LIMIT', '100')),
+                rate_limit_period=float(os.getenv('API_RATE_LIMIT_PERIOD', '60.0')),
+                retries=int(os.getenv('API_RETRIES', '3')),
+                retry_delay=float(os.getenv('API_RETRY_DELAY', '1.0'))
+            ),
+            database=DatabaseConfig(
+                host=os.getenv('DB_HOST', 'localhost'),
+                port=int(os.getenv('DB_PORT', '5432')),
+                database=os.getenv('DB_NAME', 'app_db'),
+                user=os.getenv('DB_USER', 'postgres'),
+                password=os.getenv('DB_PASSWORD', ''),
+                pool_size=int(os.getenv('DB_POOL_SIZE', '10')),
+                pool_timeout=float(os.getenv('DB_POOL_TIMEOUT', '30.0')),
+                query_timeout=float(os.getenv('DB_QUERY_TIMEOUT', '10.0'))
+            ),
+            cache=CacheConfig(
+                host=os.getenv('CACHE_HOST', 'localhost'),
+                port=int(os.getenv('CACHE_PORT', '6379')),
+                database=int(os.getenv('CACHE_DB', '0')),
+                ttl=int(os.getenv('CACHE_TTL', '3600')),
+                max_size=int(os.getenv('CACHE_MAX_SIZE', '1000')),
+                cleanup_interval=float(os.getenv('CACHE_CLEANUP_INTERVAL', '300.0'))
+            ),
+            monitoring=MonitoringConfig(
+                prometheus_port=int(os.getenv('PROMETHEUS_PORT', '9090')),
+                prometheus_path=os.getenv('PROMETHEUS_PATH', '/metrics'),
+                health_check_interval=float(os.getenv('HEALTH_CHECK_INTERVAL', '60.0')),
+                health_check_timeout=float(os.getenv('HEALTH_CHECK_TIMEOUT', '5.0')),
+                metrics_retention_days=int(os.getenv('METRICS_RETENTION_DAYS', '7')),
+                alert_cooldown=float(os.getenv('ALERT_COOLDOWN', '300.0')),
+                dashboard_port=int(os.getenv('DASHBOARD_PORT', '8080')),
+                dashboard_refresh_interval=float(os.getenv('DASHBOARD_REFRESH_INTERVAL', '5.0'))
+            ),
+            logging=LoggingConfig(
+                level=os.getenv('LOG_LEVEL', 'INFO'),
+                format=os.getenv('LOG_FORMAT', '%(asctime)s - %(name)s - %(levelname)s - %(message)s'),
+                file=os.getenv('LOG_FILE'),
+                max_size=int(os.getenv('LOG_MAX_SIZE', '10485760')),  # 10MB
+                backup_count=int(os.getenv('LOG_BACKUP_COUNT', '5'))
+            )
+        )
+        
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert configuration to dictionary."""
+        return {
+            'api': {
+                'base_url': self.api.base_url,
+                'timeout': self.api.timeout,
+                'rate_limit': self.api.rate_limit,
+                'rate_limit_period': self.api.rate_limit_period,
+                'retries': self.api.retries,
+                'retry_delay': self.api.retry_delay
+            },
+            'database': {
+                'host': self.database.host,
+                'port': self.database.port,
+                'database': self.database.database,
+                'user': self.database.user,
+                'password': self.database.password,
+                'pool_size': self.database.pool_size,
+                'pool_timeout': self.database.pool_timeout,
+                'query_timeout': self.database.query_timeout
+            },
+            'cache': {
+                'host': self.cache.host,
+                'port': self.cache.port,
+                'database': self.cache.database,
+                'ttl': self.cache.ttl,
+                'max_size': self.cache.max_size,
+                'cleanup_interval': self.cache.cleanup_interval
+            },
+            'monitoring': {
+                'prometheus_port': self.monitoring.prometheus_port,
+                'prometheus_path': self.monitoring.prometheus_path,
+                'health_check_interval': self.monitoring.health_check_interval,
+                'health_check_timeout': self.monitoring.health_check_timeout,
+                'metrics_retention_days': self.monitoring.metrics_retention_days,
+                'alert_cooldown': self.monitoring.alert_cooldown,
+                'dashboard_port': self.monitoring.dashboard_port,
+                'dashboard_refresh_interval': self.monitoring.dashboard_refresh_interval
+            },
+            'logging': {
+                'level': self.logging.level,
+                'format': self.logging.format,
+                'file': self.logging.file,
+                'max_size': self.logging.max_size,
+                'backup_count': self.logging.backup_count
+            }
+        }
 
-# API Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
-API_KEY = os.getenv("API_KEY", "test_key")
-API_TIMEOUT = int(os.getenv("API_TIMEOUT", "30"))
+# Create configuration instance
+config = Config.from_env()
 
-# API rate limits configuration
-API_RATE_LIMITS = {
-    'default': {
-        'rate': 10.0,  # requests per second
-        'burst': 20    # maximum burst size
+# Export configuration as dictionaries for backward compatibility
+API_CONFIG = config.api.__dict__
+DATABASE_CONFIG = config.database.__dict__
+CACHE_CONFIG = config.cache.__dict__
+MONITORING_CONFIG = config.monitoring.__dict__
+LOGGING_CONFIG = config.logging.__dict__
+
+# Base configuration
+BASE_CONFIG = {
+    "app_name": "Termin Bot",
+    "app_version": "1.0.0",
+    "app_description": "A bot for managing appointments",
+    "app_author": "Your Name",
+    "app_license": "MIT",
+    
+    # Environment
+    "environment": os.getenv("ENVIRONMENT", "development"),
+    "debug": os.getenv("DEBUG", "False").lower() == "true",
+    
+    # Logging
+    "log_level": os.getenv("LOG_LEVEL", "INFO"),
+    "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "log_file": "logs/app.log",
+    
+    # Database
+    "database": {
+        "url": os.getenv("DATABASE_URL", "sqlite:///data/app.db"),
+        "pool_size": int(os.getenv("DB_POOL_SIZE", "20")),
+        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "10")),
+        "echo": os.getenv("DB_ECHO", "False").lower() == "true"
     },
-    'endpoints': {
-        '/api/v1/check': {
-            'rate': 5.0,
-            'burst': 10
+    
+    # API
+    "api": {
+        "base_url": os.getenv("API_BASE_URL", "https://api.example.com"),
+        "timeout": int(os.getenv("API_TIMEOUT", "30")),
+        "retries": int(os.getenv("API_RETRIES", "3")),
+        "rate_limit": int(os.getenv("API_RATE_LIMIT", "100")),
+        "rate_limit_period": int(os.getenv("API_RATE_LIMIT_PERIOD", "60"))
+    },
+    
+    # Cache
+    "cache": {
+        "type": os.getenv("CACHE_TYPE", "memory"),
+        "url": os.getenv("CACHE_URL", "redis://localhost:6379/0"),
+        "ttl": int(os.getenv("CACHE_TTL", "300")),
+        "max_size": int(os.getenv("CACHE_MAX_SIZE", "1000")),
+        "cleanup_interval": int(os.getenv("CACHE_CLEANUP_INTERVAL", "60"))
+    },
+    
+    # Monitoring
+    "monitoring": {
+        "enabled": os.getenv("MONITORING_ENABLED", "True").lower() == "true",
+        "prometheus_port": int(os.getenv("PROMETHEUS_PORT", "9090")),
+        "health_check_interval": int(os.getenv("HEALTH_CHECK_INTERVAL", "60")),
+        "metrics_retention_days": int(os.getenv("METRICS_RETENTION_DAYS", "7")),
+        "dashboard_port": int(os.getenv("DASHBOARD_PORT", "8080")),
+        "dashboard_refresh_interval": int(os.getenv("DASHBOARD_REFRESH_INTERVAL", "5"))
+    },
+    
+    # Alerting
+    "alerts": {
+        "enabled": os.getenv("ALERTS_ENABLED", "True").lower() == "true",
+        "cooldown": int(os.getenv("ALERT_COOLDOWN", "300")),
+        "channels": os.getenv("ALERT_CHANNELS", "slack,email,webhook").split(","),
+        "slack": {
+            "webhook_url": os.getenv("SLACK_WEBHOOK_URL", ""),
+            "channel": os.getenv("SLACK_CHANNEL", "#alerts")
         },
-        '/api/v1/book': {
-            'rate': 2.0,
-            'burst': 5
+        "email": {
+            "enabled": os.getenv("EMAIL_ALERTS_ENABLED", "False").lower() == "true",
+            "smtp_host": os.getenv("SMTP_HOST", ""),
+            "smtp_port": int(os.getenv("SMTP_PORT", "587")),
+            "smtp_user": os.getenv("SMTP_USER", ""),
+            "smtp_password": os.getenv("SMTP_PASSWORD", ""),
+            "from_email": os.getenv("FROM_EMAIL", ""),
+            "to_emails": os.getenv("TO_EMAILS", "").split(",")
+        },
+        "webhook": {
+            "url": os.getenv("WEBHOOK_URL", ""),
+            "headers": {
+                "Content-Type": "application/json"
+            }
+        }
+    },
+    
+    # Security
+    "security": {
+        "secret_key": os.getenv("SECRET_KEY", "your-secret-key"),
+        "token_expiry": int(os.getenv("TOKEN_EXPIRY", "3600")),
+        "allowed_origins": os.getenv("ALLOWED_ORIGINS", "*").split(","),
+        "rate_limit": int(os.getenv("RATE_LIMIT", "100")),
+        "rate_limit_period": int(os.getenv("RATE_LIMIT_PERIOD", "60"))
+    },
+    
+    # Paths
+    "paths": {
+        "data": Path("data"),
+        "logs": Path("logs"),
+        "templates": Path("templates"),
+        "static": Path("static")
+    }
+}
+
+# Environment-specific configurations
+ENVIRONMENT_CONFIGS = {
+    "development": {
+        "debug": True,
+        "log_level": "DEBUG",
+        "database": {
+            "echo": True
+        },
+        "monitoring": {
+            "metrics_retention_days": 1
+        },
+        "alerts": {
+            "cooldown": 30
+        }
+    },
+    "testing": {
+        "debug": True,
+        "log_level": "DEBUG",
+        "database": {
+            "url": "sqlite:///data/test.db",
+            "echo": True
+        },
+        "monitoring": {
+            "metrics_retention_days": 1
+        },
+        "alerts": {
+            "cooldown": 30
+        }
+    },
+    "production": {
+        "debug": False,
+        "log_level": "INFO",
+        "database": {
+            "echo": False
+        },
+        "monitoring": {
+            "metrics_retention_days": 30
+        },
+        "alerts": {
+            "cooldown": 300
         }
     }
 }
 
-# Anti-bot configuration
-ANTI_BOT_CONFIG = {
-    "enabled": bool(os.getenv("ANTI_BOT_ENABLED", "true")),
-    "max_requests_per_ip": int(os.getenv("MAX_REQUESTS_PER_IP", "100")),
-    "max_requests_per_second": float(os.getenv("MAX_REQUESTS_PER_SECOND", "10.0")),
-    "window_size": int(os.getenv("WINDOW_SIZE", "3600")),  # seconds
-    "block_duration": int(os.getenv("BLOCK_DURATION", "86400")),  # seconds
-    "whitelist": os.getenv("IP_WHITELIST", "").split(","),
-    "blacklist": os.getenv("IP_BLACKLIST", "").split(","),
-    "patterns": {
-        "suspicious_ua": [
-            "bot",
-            "crawler",
-            "spider",
-            "curl"
-        ]
-    }
-}
+def get_config() -> Dict[str, Any]:
+    """Get the current configuration."""
+    environment = BASE_CONFIG["environment"]
+    config = BASE_CONFIG.copy()
+    
+    # Apply environment-specific configuration
+    if environment in ENVIRONMENT_CONFIGS:
+        env_config = ENVIRONMENT_CONFIGS[environment]
+        _deep_update(config, env_config)
+        
+    return config
 
-# CORS Configuration
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+def _deep_update(base_dict: Dict[str, Any], update_dict: Dict[str, Any]) -> None:
+    """Update a dictionary recursively."""
+    for key, value in update_dict.items():
+        if isinstance(value, dict) and key in base_dict and isinstance(base_dict[key], dict):
+            _deep_update(base_dict[key], value)
+        else:
+            base_dict[key] = value
 
-# Database Configuration
+# Create configuration instance
+config = get_config()
+
+# Export specific configurations
+API_CONFIG = config["api"]
+CACHE_CONFIG = config["cache"]
+MONITORING_CONFIG = config["monitoring"]
+ALERT_CONFIG = config["alerts"]
+DASHBOARD_CONFIG = config["monitoring"]
+
+# Database configuration
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "sqlite+aiosqlite:///app.db"
 )
 
-# Database Pool Configuration
-DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
-DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
-DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", "30"))
-DB_POOL_RECYCLE = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # 30 minutes
-DB_POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
-DB_RETRY_ATTEMPTS = int(os.getenv("DB_RETRY_ATTEMPTS", "3"))
-DB_RETRY_DELAY = int(os.getenv("DB_RETRY_DELAY", "1"))  # seconds
-
-# Redis Configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
-REDIS_URL = os.getenv(
-    "REDIS_URL",
-    f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+# API configuration
+BASE_URL = os.getenv(
+    "BASE_URL",
+    "https://terminvereinbarung.muenchen.de"
 )
 
-# Telegram Bot Configuration
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "test_token")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "termin_bot")
-BOT_WEBHOOK_URL = os.getenv("BOT_WEBHOOK_URL", "")
-BOT_WEBHOOK_PATH = os.getenv("BOT_WEBHOOK_PATH", "/webhook")
-
-# Appointment Manager Configuration
-CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "60"))  # seconds
-RETRY_DELAY = int(os.getenv("RETRY_DELAY", "5"))  # seconds
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
-NUM_WORKERS = int(os.getenv("NUM_WORKERS", "3"))
-MAX_PARALLEL_BOOKINGS = int(os.getenv("MAX_PARALLEL_BOOKINGS", "5"))  # maximum number of parallel booking attempts
-BOOKING_TIMEOUT = int(os.getenv("BOOKING_TIMEOUT", "30"))  # seconds to wait for booking attempts
-
-# Health check thresholds
-CPU_THRESHOLD = float(os.getenv("CPU_THRESHOLD", "80.0"))
-MEMORY_THRESHOLD = float(os.getenv("MEMORY_THRESHOLD", "80.0"))
-REQUEST_SUCCESS_RATE_THRESHOLD = float(os.getenv("REQUEST_SUCCESS_RATE_THRESHOLD", "0.95"))
-RESPONSE_TIME_THRESHOLD = float(os.getenv("RESPONSE_TIME_THRESHOLD", "2.0"))
-ERROR_RATE_THRESHOLD = float(os.getenv("ERROR_RATE_THRESHOLD", "0.05"))
-ERROR_THRESHOLD = int(os.getenv("ERROR_THRESHOLD", "100"))
-SUCCESS_RATE_THRESHOLD = float(os.getenv("SUCCESS_RATE_THRESHOLD", "0.95"))
-
-# Health Check Configuration
-HEALTH_CHECK_INTERVAL = int(os.getenv("HEALTH_CHECK_INTERVAL", "60"))  # seconds
-HEALTH_CHECK_HISTORY_SIZE = int(os.getenv("HEALTH_CHECK_HISTORY_SIZE", "100"))
-HEALTH_CHECK_CONFIG = {
-    "interval": HEALTH_CHECK_INTERVAL,
-    "history_size": HEALTH_CHECK_HISTORY_SIZE,
-    "thresholds": {
-        "critical": {
-            "cpu_usage": 90.0,
-            "memory_usage": 85.0,
-            "disk_usage": 80.0,
-            "request_rate": 1000.0,
-            "error_rate": 0.1,
-            "active_tasks": 50,
-            "response_time": 2.0,
-            "rate_limit_usage": 0.9,
-            "errors_last_hour": 100
-        },
-        "warning": {
-            "cpu_usage": 70.0,
-            "memory_usage": 65.0,
-            "disk_usage": 60.0,
-            "request_rate": 800.0,
-            "error_rate": 0.05,
-            "active_tasks": 30,
-            "response_time": 1.0,
-            "rate_limit_usage": 0.7,
-            "errors_last_hour": 50
-        }
-    }
+API_RATE_LIMITS = {
+    "check": 10,  # requests per minute
+    "book": 5,    # requests per minute
+    "general": 20 # general requests per minute
 }
 
-# Metrics Configuration
-METRICS_CONFIG = {
-    "enabled": bool(os.getenv("METRICS_ENABLED", "true")),
-    "port": int(os.getenv("METRICS_PORT", "9090")),
-    "path": os.getenv("METRICS_PATH", "/metrics"),
-    "prefix": os.getenv("METRICS_PREFIX", "mta_"),
-    "labels": {
-        "environment": ENV,
-        "service": "termin_bot"
-    }
-}
+API_TIMEOUT = 30  # seconds
+MAX_RETRIES = 3
+RETRY_DELAY = 1  # seconds
 
-# Logging Configuration
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-LOG_FORMAT = os.getenv("LOG_FORMAT", "json")
-LOG_FILE = os.getenv("LOG_FILE", "termin_bot.log")
-
-# Notification Configuration
-NOTIFICATION_CONFIG = {
-    "enabled": bool(os.getenv("NOTIFICATION_ENABLED", "true")),
-    "max_retries": int(os.getenv("NOTIFICATION_MAX_RETRIES", "3")),
-    "retry_delay": int(os.getenv("NOTIFICATION_RETRY_DELAY", "60")),  # seconds
-    "batch_size": int(os.getenv("NOTIFICATION_BATCH_SIZE", "100")),
-    "cooldown": int(os.getenv("NOTIFICATION_COOLDOWN", "300")),  # seconds
-    "daily_digest_time": os.getenv("NOTIFICATION_DAILY_DIGEST_TIME", "08:00"),  # time to send daily digest (HH:MM)
-    "reminder_days": [1, 3, 7],  # days before appointment to send reminders
-    "formats": {
-        "date_format": os.getenv("NOTIFICATION_DATE_FORMAT", "%Y-%m-%d"),
-        "time_format": os.getenv("NOTIFICATION_TIME_FORMAT", "%H:%M"),
-        "datetime_format": os.getenv("NOTIFICATION_DATETIME_FORMAT", "%Y-%m-%d %H:%M")
-    },
-    "priorities": {
-        "appointment_found": "normal",
-        "appointment_booked": "high",
-        "booking_failed": "normal",
-        "booking_reminder": "high",
-        "daily_digest": "normal"
-    }
-}
-
-# Cache Configuration
-CACHE_CONFIG = {
-    "default_ttl": int(os.getenv("CACHE_DEFAULT_TTL", "3600")),  # seconds
-    "max_size": int(os.getenv("CACHE_MAX_SIZE", "1000")),
-    "enabled": bool(os.getenv("CACHE_ENABLED", "true"))
-}
-
-# Celery Configuration
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
-
-# Load website configuration from database
-async def load_website_config() -> Dict[str, Any]:
-    """Load website configuration from database."""
-    try:
-        from src.database.db import db
-        config = await db.get_website_config()
-        if not config:
-            raise ValueError("Website configuration not found in database")
-        return config
-    except Exception as e:
-        raise ValueError(f"Failed to load website configuration: {str(e)}")
-
-# Load website configuration
-try:
-    # Since we're in a synchronous context, we need to handle the async call properly
-    WEBSITE_CONFIG = asyncio.get_event_loop().run_until_complete(load_website_config())
-except Exception as e:
-    WEBSITE_CONFIG = {}
-
-# Redis Configuration
-REDIS_POOL_SIZE = int(os.getenv("REDIS_POOL_SIZE", "10"))
-
-# Target Website Configuration
-TARGET_URL = os.getenv(
-    "TARGET_URL",
-    "https://stadt.muenchen.de/buergerservice/terminvereinbarung.html"
-)
-BASE_URL = os.getenv("WEBSITE_BASE_URL", "https://www48.muenchen.de")
-WEBSITE_TIMEOUT = int(os.getenv("WEBSITE_TIMEOUT", "30"))
-
-# Captcha Configuration
-CAPTCHA_ENABLED = os.getenv("CAPTCHA_ENABLED", "true").lower() == "true"
-CAPTCHA_SOLUTION_TIMEOUT = int(os.getenv("CAPTCHA_SOLUTION_TIMEOUT", "30"))
-CAPTCHA_2CAPTCHA_API_KEY = os.getenv("CAPTCHA_2CAPTCHA_API_KEY", "")
-CAPTCHA_SOLVER = os.getenv("CAPTCHA_SOLVER", "2captcha")  # Options: 2captcha, dummy
+# Captcha configuration
 CAPTCHA_CONFIG = {
-    "enabled": CAPTCHA_ENABLED,
-    "solution_timeout": CAPTCHA_SOLUTION_TIMEOUT,
-    "solver": CAPTCHA_SOLVER,
-    "2captcha_api_key": CAPTCHA_2CAPTCHA_API_KEY,
+    "enabled": os.getenv("CAPTCHA_ENABLED", "true").lower() == "true",
+    "site_key": os.getenv("CAPTCHA_SITE_KEY", ""),
     "endpoints": {
-        "puzzle": "/buergeransicht/api/backend/captcha-puzzle",
-        "verify": "/buergeransicht/api/backend/captcha-verify"
+        "puzzle": "/api/v1/captcha/puzzle",
+        "verify": "/api/v1/captcha/verify"
     }
 }
 
-# Monitoring Configuration
-METRICS_ENABLED = os.getenv("METRICS_ENABLED", "True").lower() == "true"
-MONITORING_PORT = int(os.getenv("MONITORING_PORT", "8000"))
-MONITORING_HOST = os.getenv("MONITORING_HOST", "0.0.0.0")
-
-# Task Queue Configuration
-CELERY_WORKERS = int(os.getenv("CELERY_WORKERS", "2"))
-TASK_SOFT_TIME_LIMIT = int(os.getenv("TASK_SOFT_TIME_LIMIT", "240"))  # seconds
-TASK_TIME_LIMIT = int(os.getenv("TASK_TIME_LIMIT", "300"))  # seconds
-
-# System Configuration
-DOCKER_MODE = os.getenv("DOCKER_MODE", "False").lower() == "true"
-SYSTEM_CONFIG = {
-    "timezone": os.getenv("TIMEZONE", "UTC"),
-    "language": os.getenv("LANGUAGE", "en"),
-    "debug": bool(os.getenv("DEBUG", "false")),
-    "testing": bool(os.getenv("TESTING", "false")),
-    "environment": ENV
-}
-
-# Chrome/Selenium Configuration
-CHROME_OPTIONS = {
-    "headless": True,
-    "no_sandbox": True,
-    "disable_dev_shm_usage": True,
-    "disable_gpu": True,
-    "window_size": "1920,1080"
-}
-
-# User Credentials (from environment variables)
+# User credentials
 USER_CREDENTIALS = {
-    "name": os.getenv("USER_NAME", "Yavuz Topsever"),
-    "email": os.getenv("USER_EMAIL", "yavuz.topsever@windowslive.com"),
-    "person_count": int(os.getenv("PERSON_COUNT", "1"))
+    "username": os.getenv("API_USERNAME", ""),
+    "password": os.getenv("API_PASSWORD", "")
 }
 
-# Notification Configuration
-NOTIFICATION_SETTINGS = {
-    "enabled": os.getenv("NOTIFICATIONS_ENABLED", "True").lower() == "true",
-    "retry_delay": int(os.getenv("NOTIFICATION_RETRY_DELAY", "60")),  # seconds
-    "max_retries": int(os.getenv("NOTIFICATION_MAX_RETRIES", "3"))
-}
-
-# Application Settings
-LOG_FILE = os.getenv("LOG_FILE", "logs/mta.log")
-LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", "10485760"))  # 10MB
-LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "5"))
-
-# Redis Configuration (for Celery)
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
-REDIS_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
-
-# Celery Configuration
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", REDIS_URL)
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
+# Monitoring configuration
+PROMETHEUS_PORT = int(os.getenv("PROMETHEUS_PORT", "9090"))
+ENABLE_METRICS = os.getenv("ENABLE_METRICS", "true").lower() == "true"
 
 # Health check configuration
-HEALTH_CHECK_CONFIG = {
-    "warning_cpu_threshold": 80.0,
-    "critical_cpu_threshold": 90.0,
-    "warning_memory_threshold": 80.0,
-    "critical_memory_threshold": 90.0,
-    "warning_disk_threshold": 80.0,
-    "critical_disk_threshold": 90.0,
-    "warning_request_rate": 100.0,  # requests per second
-    "critical_request_rate": 200.0,  # requests per second
-    "warning_error_rate": 5.0,  # errors per second
-    "critical_error_rate": 10.0,  # errors per second
-    "min_success_rate": 0.95,  # 95% success rate required
-    "max_response_time": 2.0,  # maximum 2 seconds average response time
-    "max_errors_per_hour": 100,  # maximum 100 errors per hour
-    "metrics_retention_days": 7,  # keep metrics for 7 days
-    "check_interval": 60  # check every 60 seconds
-}
+HEALTH_CHECK_INTERVAL = int(os.getenv("HEALTH_CHECK_INTERVAL", "60"))  # seconds
+HEALTH_CHECK_TIMEOUT = int(os.getenv("HEALTH_CHECK_TIMEOUT", "5"))    # seconds
 
-# Configuration validation
-def validate_config() -> bool:
-    """Validate the application configuration."""
-    required_vars = [
-        "TELEGRAM_BOT_TOKEN",
-        "DATABASE_URL",
-        "REDIS_URI",
-        "WEBSITE_BASE_URL"
-    ]
+# Task queue configuration
+CELERY_BROKER_URL = os.getenv(
+    "CELERY_BROKER_URL",
+    "redis://localhost:6379/0"
+)
+CELERY_RESULT_BACKEND = os.getenv(
+    "CELERY_RESULT_BACKEND",
+    "redis://localhost:6379/0"
+)
+
+# Telegram bot configuration
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_WEBHOOK_URL = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+TELEGRAM_WEBHOOK_PORT = int(os.getenv("TELEGRAM_WEBHOOK_PORT", "8443"))
+
+# Notification configuration
+NOTIFICATION_ENABLED = os.getenv("NOTIFICATION_ENABLED", "true").lower() == "true"
+NOTIFICATION_CHECK_INTERVAL = int(os.getenv("NOTIFICATION_CHECK_INTERVAL", "300"))  # seconds
+
+# Cache configuration
+CACHE_ENABLED = os.getenv("CACHE_ENABLED", "true").lower() == "true"
+CACHE_TTL = int(os.getenv("CACHE_TTL", "300"))  # seconds
+CACHE_REDIS_URL = os.getenv(
+    "CACHE_REDIS_URL",
+    "redis://localhost:6379/1"
+)
+
+# Security configuration
+SECURITY_ENABLED = os.getenv("SECURITY_ENABLED", "true").lower() == "true"
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION = int(os.getenv("JWT_EXPIRATION", "3600"))  # seconds
+
+# Rate limiting configuration
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "100"))
+RATE_LIMIT_PERIOD = int(os.getenv("RATE_LIMIT_PERIOD", "60"))  # seconds
+
+# Error handling configuration
+ERROR_REPORTING_ENABLED = os.getenv("ERROR_REPORTING_ENABLED", "true").lower() == "true"
+ERROR_REPORTING_EMAIL = os.getenv("ERROR_REPORTING_EMAIL", "")
+
+# Development configuration
+TESTING = os.getenv("TESTING", "false").lower() == "true"
+
+# Load additional configuration from environment
+def load_config() -> Dict[str, Any]:
+    """Load configuration from environment variables."""
+    config = {
+        "database": {
+            "url": DATABASE_URL
+        },
+        "api": {
+            "base_url": BASE_URL,
+            "rate_limits": API_RATE_LIMITS,
+            "timeout": API_TIMEOUT,
+            "max_retries": MAX_RETRIES,
+            "retry_delay": RETRY_DELAY
+        },
+        "captcha": CAPTCHA_CONFIG,
+        "user_credentials": USER_CREDENTIALS,
+        "logging": {
+            "level": os.getenv("LOG_LEVEL", "INFO"),
+            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            "file": "logs/app.log"
+        },
+        "monitoring": {
+            "prometheus_port": PROMETHEUS_PORT,
+            "enable_metrics": ENABLE_METRICS
+        },
+        "health_check": {
+            "interval": HEALTH_CHECK_INTERVAL,
+            "timeout": HEALTH_CHECK_TIMEOUT
+        },
+        "task_queue": {
+            "broker_url": CELERY_BROKER_URL,
+            "result_backend": CELERY_RESULT_BACKEND
+        },
+        "telegram": {
+            "bot_token": TELEGRAM_BOT_TOKEN,
+            "webhook_url": TELEGRAM_WEBHOOK_URL,
+            "webhook_port": TELEGRAM_WEBHOOK_PORT
+        },
+        "notification": {
+            "enabled": NOTIFICATION_ENABLED,
+            "check_interval": NOTIFICATION_CHECK_INTERVAL
+        },
+        "cache": {
+            "enabled": CACHE_ENABLED,
+            "ttl": CACHE_TTL,
+            "redis_url": CACHE_REDIS_URL
+        },
+        "security": {
+            "enabled": SECURITY_ENABLED,
+            "jwt_secret": JWT_SECRET,
+            "jwt_algorithm": JWT_ALGORITHM,
+            "jwt_expiration": JWT_EXPIRATION
+        },
+        "rate_limit": {
+            "enabled": RATE_LIMIT_ENABLED,
+            "requests": RATE_LIMIT_REQUESTS,
+            "period": RATE_LIMIT_PERIOD
+        },
+        "error_reporting": {
+            "enabled": ERROR_REPORTING_ENABLED,
+            "email": ERROR_REPORTING_EMAIL
+        },
+        "development": {
+            "debug": os.getenv("DEBUG", "false").lower() == "true",
+            "testing": TESTING
+        }
+    }
     
-    missing_vars = []
-    
-    for var in required_vars:
-        if not os.getenv(var):
-            missing_vars.append(var)
-            
-    if missing_vars:
-        print(f"Missing required environment variables: {', '.join(missing_vars)}")
-        return False
-        
-    return True
+    return config 

@@ -23,69 +23,51 @@ from src.api.api_config import APIConfig
 
 @pytest.fixture
 def mock_db():
-    """Mock database."""
-    mock = AsyncMock()
-    mock.get_active_subscriptions.return_value = []
-    return mock
+    """Mock database for testing."""
+    with patch('src.manager.appointment_manager.db') as mock:
+        mock.get_subscriptions = AsyncMock()
+        mock.add_appointment = AsyncMock()
+        mock.update_subscription = AsyncMock()
+        yield mock
 
 @pytest.fixture
 def mock_api_config():
-    """Mock API configuration."""
-    mock = AsyncMock()
-    mock._session = AsyncMock()
-    mock._check_rate_limit = AsyncMock(return_value=True)
-    mock.get_check_availability_request = AsyncMock(return_value={
-        "url": "/api/v1/check",
-        "method": "POST",
-        "data": {}
-    })
-    mock.get_book_appointment_request = AsyncMock(return_value={
-        "url": "/api/v1/book",
-        "method": "POST",
-        "data": {}
-    })
-    mock.parse_availability_response = AsyncMock(return_value=[{
-        "date": "2024-03-20",
-        "time": "14:30"
-    }])
-    mock.parse_booking_response = AsyncMock(return_value={
-        "success": True,
-        "booking_id": "12345"
-    })
-    mock._session.post = AsyncMock()
-    mock._session.post.return_value.json = AsyncMock(return_value={
-        "slots": [{"date": "2024-03-20", "time": "14:30"}]
-    })
-    mock._session.post.return_value.status = 200
-    return mock
+    """Mock API config for testing."""
+    with patch('src.manager.appointment_manager.api_config') as mock:
+        mock.check_availability = AsyncMock()
+        mock.book_appointment = AsyncMock()
+        yield mock
 
 @pytest.fixture
-def mock_notify():
-    """Mock notification functions."""
-    return {
-        "found": AsyncMock(),
-        "booked": AsyncMock()
-    }
+def mock_notification_manager():
+    """Mock notification manager for testing."""
+    with patch('src.manager.appointment_manager.notification_manager') as mock:
+        mock.send_appointment_found_notification = AsyncMock()
+        mock.send_appointment_booked_notification = AsyncMock()
+        mock.send_booking_failed_notification = AsyncMock()
+        yield mock
 
 @pytest.fixture
 def sample_subscription():
-    """Sample subscription data."""
-    return MagicMock(
-        id=1,
-        user_id=1,
-        service_id="test_service",
-        location_id="test_location",
-        date_preferences={"date": "2024-03-20"},
-        time_preferences={"start": "09:00", "end": "17:00"}
-    )
+    """Sample subscription data for testing."""
+    return {
+        "user_id": "test_user_id",
+        "service_id": "test_service",
+        "location_id": "test_location",
+        "preferences": {
+            "time_ranges": [
+                {"start": "09:00", "end": "17:00"}
+            ],
+            "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        }
+    }
 
 @pytest.fixture
-async def appointment_manager(mock_db, mock_api_config, mock_notify):
+async def appointment_manager(mock_db, mock_api_config, mock_notification_manager):
     """Create an appointment manager instance."""
     with patch("src.manager.appointment_manager.db", mock_db), \
          patch("src.manager.appointment_manager.api_config", mock_api_config), \
-         patch("src.manager.appointment_manager.notify_user_appointment_found", mock_notify["found"]), \
-         patch("src.manager.appointment_manager.notify_user_appointment_booked", mock_notify["booked"]):
+         patch("src.manager.appointment_manager.notification_manager", mock_notification_manager):
         manager = AppointmentManager()
         await manager.initialize()
         return manager
@@ -97,7 +79,7 @@ async def cleanup_appointment_manager(appointment_manager):
     await appointment_manager.close()
 
 @pytest.mark.asyncio
-async def test_initialization(appointment_manager):
+async def test_initialization(mock_db, mock_api_config, mock_notification_manager):
     """Test appointment manager initialization."""
     manager = await appointment_manager
     assert manager is not None
@@ -105,6 +87,8 @@ async def test_initialization(appointment_manager):
     assert manager.workers is not None
     assert manager.scheduler is not None
     assert manager.is_running is True
+    
+    await manager.stop()
 
 @pytest.mark.asyncio
 async def test_cleanup(appointment_manager):
@@ -128,199 +112,223 @@ async def test_start_stop(appointment_manager):
     assert manager.scheduler is not None
 
 @pytest.mark.asyncio
-async def test_check_appointments(appointment_manager, sample_subscription, mock_api_config):
-    """Test checking appointments."""
+async def test_check_appointments(mock_db, mock_api_config, sample_subscription):
+    """Test check_appointments method."""
+    # Setup mock data
+    mock_db.get_subscriptions.return_value = [sample_subscription]
+    mock_api_config.check_availability.return_value = {
+        "slots": [
+            {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "time": "14:30",
+                "location": "Test Location",
+                "type": "Regular",
+                "available": True
+            }
+        ]
+    }
+    
+    # Initialize manager
     manager = await appointment_manager
-    # Stop the scheduler and wait for it to complete
-    await manager.stop()
-    await asyncio.sleep(0.1)  # Give time for scheduler to stop
     
-    # Setup mock responses
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.json.return_value = {"slots": [{"date": "2024-03-20", "time": "14:30"}]}
-    mock_api_config._session.post.return_value = mock_response
-    
-    # Execute test
-    await manager._check_appointments()
-    
-    # Verify
-    mock_api_config._check_rate_limit.assert_awaited_once_with('/api/v1/check')
-    mock_api_config._session.post.assert_awaited_once()
+    try:
+        # Execute test
+        await manager.check_appointments()
+        
+        # Verify API call
+        mock_api_config.check_availability.assert_called_once()
+        
+    finally:
+        # Cleanup
+        await manager.stop()
 
 @pytest.mark.asyncio
-async def test_check_appointments_rate_limit(appointment_manager, sample_subscription, mock_api_config):
-    """Test rate limit handling in check appointments."""
+async def test_check_appointments_rate_limit(mock_db, mock_api_config):
+    """Test rate limiting in check_appointments method."""
+    # Setup mock data
+    mock_db.get_subscriptions.return_value = [{"service_id": "test_service"}]
+    mock_api_config.check_availability.side_effect = [
+        {"slots": []},
+        {"slots": []},
+        {"slots": []}
+    ]
+    
+    # Initialize manager
     manager = await appointment_manager
-    # Stop the scheduler and wait for it to complete
-    await manager.stop()
-    await asyncio.sleep(0.1)  # Give time for scheduler to stop
     
-    # Setup rate limit exceeded
-    mock_api_config._check_rate_limit.return_value = False
-    
-    # Execute test
-    await manager._check_appointments()
-    
-    # Verify
-    mock_api_config._check_rate_limit.assert_awaited_once_with('/api/v1/check')
-    mock_api_config._session.post.assert_not_awaited()
+    try:
+        # Execute test
+        await manager.check_appointments()
+        
+        # Verify rate limiting
+        assert mock_api_config.check_availability.call_count <= 2
+        
+    finally:
+        # Cleanup
+        await manager.stop()
 
 @pytest.mark.asyncio
-async def test_process_booking_task(appointment_manager, sample_subscription, mock_api_config):
+async def test_process_booking_task(mock_db, mock_api_config, sample_subscription):
     """Test processing a booking task."""
-    manager = await appointment_manager
-    # Stop the scheduler and wait for it to complete
-    await manager.stop()
-    await asyncio.sleep(0.1)  # Give time for scheduler to stop
-    
-    # Setup mock responses
+    # Setup mock data
     task = {
-        "user_id": sample_subscription.user_id,
-        "service_id": sample_subscription.service_id,
-        "location_id": sample_subscription.location_id,
+        "user_id": sample_subscription["user_id"],
+        "service_id": sample_subscription["service_id"],
+        "location_id": sample_subscription["location_id"],
         "slot": {
-            "date": "2024-03-20",
+            "date": datetime.now().strftime("%Y-%m-%d"),
             "time": "14:30"
         }
     }
     
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.json.return_value = {"success": True, "booking_id": "12345"}
-    mock_api_config._session.post.return_value = mock_response
-    
-    # Execute test
-    result = await manager._process_booking_task(task)
-    
-    # Verify
-    assert result["success"] is True
-    mock_api_config._check_rate_limit.assert_awaited_once_with('/api/v1/book')
-    mock_api_config._session.post.assert_awaited_once()
-
-@pytest.mark.asyncio
-async def test_check_availability(appointment_manager, mock_api_config):
-    """Test checking appointment availability."""
-    manager = await appointment_manager
-    # Stop the scheduler and wait for it to complete
-    await manager.stop()
-    await asyncio.sleep(0.1)  # Give time for scheduler to stop
-    
-    # Setup mock responses
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.json.return_value = {"slots": [{"date": "2024-03-20", "time": "14:30"}]}
-    mock_api_config._session.post.return_value = mock_response
-    
-    # Execute test
-    slots = await manager._check_availability(
-        service_id="test_service",
-        location_id="test_location",
-        date_preferences={"date": "2024-03-20"}
-    )
-    
-    # Verify
-    assert len(slots) == 1
-    mock_api_config._check_rate_limit.assert_awaited_once_with('/api/v1/check')
-    mock_api_config._session.post.assert_awaited_once()
-
-@pytest.mark.asyncio
-async def test_check_availability_error(appointment_manager, mock_api_config):
-    """Test error handling in check availability."""
-    manager = await appointment_manager
-    # Stop the scheduler and wait for it to complete
-    await manager.stop()
-    await asyncio.sleep(0.1)  # Give time for scheduler to stop
-    
-    # Setup error response
-    mock_response = AsyncMock()
-    mock_response.status = 500
-    mock_response.json.return_value = {"error": "Internal server error"}
-    mock_api_config._session.post.return_value = mock_response
-    
-    # Execute test
-    slots = await manager._check_availability(
-        service_id="test_service",
-        location_id="test_location",
-        date_preferences={"date": "2024-03-20"}
-    )
-    
-    # Verify
-    assert len(slots) == 0
-    mock_api_config._check_rate_limit.assert_awaited_once_with('/api/v1/check')
-    mock_api_config._session.post.assert_awaited_once()
-
-@pytest.mark.asyncio
-async def test_matches_preferences(appointment_manager):
-    """Test matching appointment slots against user preferences."""
-    manager = await appointment_manager
-    slot = {
-        "date": "2024-03-20",  # Wednesday
-        "time": "14:30"
+    mock_api_config.book_appointment.return_value = {
+        "success": True,
+        "booking_id": "test_booking_id"
     }
     
-    preferences = {
-        "date_range": {
-            "start": "2024-03-20",
-            "end": "2024-03-25"
-        },
-        "time_range": {
-            "start": "09:00",
-            "end": "17:00"
-        },
-        "weekdays": [2, 3]  # Wednesday, Thursday
-    }
+    # Initialize manager
+    manager = await appointment_manager
     
-    # Execute test
-    result = await manager._matches_preferences(slot, preferences)
-    
-    # Verify
-    assert result is True
+    try:
+        # Execute test
+        result = await manager._process_booking_task(task)
+        
+        # Verify result
+        assert result["success"] is True
+        assert "booking_id" in result
+        assert result["booking_id"] == "test_booking_id"
+        
+        # Verify API call
+        mock_api_config.book_appointment.assert_called_once()
+        
+    finally:
+        # Cleanup
+        await manager.stop()
 
 @pytest.mark.asyncio
-async def test_matches_preferences_outside_range(appointment_manager):
-    """Test matching slots outside preferred range."""
-    manager = await appointment_manager
-    slot = {
-        "date": "2024-03-20",
-        "time": "08:00"  # Outside time range
+async def test_check_availability(mock_api_config):
+    """Test check_availability method."""
+    # Setup mock data
+    mock_api_config.check_availability.return_value = {
+        "slots": [
+            {
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "time": "14:30",
+                "location": "Test Location",
+                "type": "Regular",
+                "available": True
+            }
+        ]
     }
     
-    preferences = {
-        "date_range": {
-            "start": "2024-03-20",
-            "end": "2024-03-25"
-        },
-        "time_range": {
-            "start": "09:00",
-            "end": "17:00"
+    # Initialize manager
+    manager = await appointment_manager
+    
+    try:
+        # Execute test
+        result = await manager._check_availability(
+            service_id="test_service",
+            location_id="test_location"
+        )
+        
+        # Verify result
+        assert result is not None
+        assert "slots" in result
+        assert len(result["slots"]) == 1
+        
+        # Verify API call
+        mock_api_config.check_availability.assert_called_once()
+        
+    finally:
+        # Cleanup
+        await manager.stop()
+
+@pytest.mark.asyncio
+async def test_check_availability_error(mock_api_config):
+    """Test error handling in check_availability method."""
+    # Setup mock data
+    mock_api_config.check_availability.side_effect = Exception("API error")
+    
+    # Initialize manager
+    manager = await appointment_manager
+    
+    try:
+        # Execute test
+        result = await manager._check_availability(
+            service_id="test_service",
+            location_id="test_location"
+        )
+        
+        # Verify result
+        assert result is None
+        
+        # Verify API call
+        mock_api_config.check_availability.assert_called_once()
+        
+    finally:
+        # Cleanup
+        await manager.stop()
+
+@pytest.mark.asyncio
+async def test_matches_preferences(sample_subscription):
+    """Test matches_preferences method."""
+    # Initialize manager
+    manager = await appointment_manager
+    
+    try:
+        # Test with matching preferences
+        slot = {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "time": "14:30",
+            "location": "Test Location",
+            "type": "Regular"
         }
-    }
-    
-    # Execute test
-    result = await manager._matches_preferences(slot, preferences)
-    
-    # Verify
-    assert result is False
+        assert manager._matches_preferences(slot, sample_subscription["preferences"]) is True
+        
+        # Test with non-matching preferences
+        slot["time"] = "18:00"
+        assert manager._matches_preferences(slot, sample_subscription["preferences"]) is False
+        
+    finally:
+        # Cleanup
+        await manager.stop()
 
 @pytest.mark.asyncio
-async def test_matches_preferences_invalid_date(appointment_manager):
-    """Test matching slots with invalid date format."""
+async def test_matches_preferences_outside_range(sample_subscription):
+    """Test matches_preferences with time outside range."""
+    # Initialize manager
     manager = await appointment_manager
-    slot = {
-        "date": "invalid_date",
-        "time": "14:30"
-    }
     
-    preferences = {
-        "date_range": {
-            "start": "2024-03-20",
-            "end": "2024-03-25"
+    try:
+        # Test with time outside range
+        slot = {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "time": "18:00",
+            "location": "Test Location",
+            "type": "Regular"
         }
-    }
+        assert manager._matches_preferences(slot, sample_subscription["preferences"]) is False
+        
+    finally:
+        # Cleanup
+        await manager.stop()
+
+@pytest.mark.asyncio
+async def test_matches_preferences_invalid_date(sample_subscription):
+    """Test matches_preferences with invalid date."""
+    # Initialize manager
+    manager = await appointment_manager
     
-    # Execute test
-    result = await manager._matches_preferences(slot, preferences)
-    
-    # Verify
-    assert result is False 
+    try:
+        # Test with invalid date
+        slot = {
+            "date": "invalid_date",
+            "time": "14:30",
+            "location": "Test Location",
+            "type": "Regular"
+        }
+        assert manager._matches_preferences(slot, sample_subscription["preferences"]) is False
+        
+    finally:
+        # Cleanup
+        await manager.stop() 

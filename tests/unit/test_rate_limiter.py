@@ -1,7 +1,9 @@
+"""Unit tests for rate limiter."""
+
 import unittest
 import time
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
 import asyncio
 
@@ -19,7 +21,11 @@ class TestRateLimiter:
     @pytest.fixture
     def rate_limiter(self):
         """Create a rate limiter for testing."""
-        return RateLimiter()
+        with patch('src.utils.rate_limiter.API_RATE_LIMITS', {
+            '/api/v1/check': {'rate': 5, 'burst': 10},
+            '/api/v1/book': {'rate': 2, 'burst': 5}
+        }):
+            return RateLimiter()
     
     def test_allow_request(self, rate_limiter):
         """Test request allowance."""
@@ -137,15 +143,15 @@ class TestRateLimitedDecorator:
         test_func()
         
         # Verify metrics were updated
-        mock_metrics.update_rate_limits.assert_called_once()
-        mock_metrics.record_rate_limit_hit.assert_not_called()
+        mock_metrics.increment.assert_called_with("rate_limit_requests", tags={"endpoint": endpoint})
+        mock_metrics.increment.assert_not_called_with("rate_limit_exceeded", tags={"endpoint": endpoint})
         
         # Make many requests to trigger rate limit
         for _ in range(10):
             test_func()
         
         # Verify rate limit hit was recorded
-        mock_metrics.record_rate_limit_hit.assert_called_once_with(endpoint)
+        mock_metrics.increment.assert_called_with("rate_limit_exceeded", tags={"endpoint": endpoint})
 
 if __name__ == "__main__":
     unittest.main() 

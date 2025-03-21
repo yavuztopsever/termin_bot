@@ -7,6 +7,7 @@ import psutil
 from src.monitoring.health_monitor import HealthMonitor
 from src.database.database import AsyncDatabase
 import asyncio
+from src.config import settings
 
 @pytest.fixture
 async def mock_db():
@@ -272,4 +273,119 @@ async def test_monitor_system_health(health_monitor):
     await asyncio.sleep(0.1)  # Let the monitor run briefly
     await health_monitor.stop()
     history = await health_monitor.get_metrics_history()
-    assert len(history) > 0 
+    assert len(history) > 0
+
+@pytest.mark.asyncio
+async def test_health_monitor_initialization():
+    """Test health monitor initialization."""
+    monitor = HealthMonitor(
+        check_interval=settings.HEALTH_CHECK_INTERVAL,
+        alert_threshold=settings.HEALTH_ALERT_THRESHOLD,
+        max_history=settings.HEALTH_MAX_HISTORY
+    )
+    
+    assert monitor.check_interval == settings.HEALTH_CHECK_INTERVAL
+    assert monitor.alert_threshold == settings.HEALTH_ALERT_THRESHOLD
+    assert monitor.max_history == settings.HEALTH_MAX_HISTORY
+    assert not monitor.running
+    assert len(monitor.health_history) == 0
+
+@pytest.mark.asyncio
+async def test_health_monitor_start_stop(health_monitor):
+    """Test health monitor start and stop."""
+    # Monitor should be running after start
+    assert health_monitor.running
+    
+    # Stop the monitor
+    await health_monitor.stop()
+    assert not health_monitor.running
+
+@pytest.mark.asyncio
+async def test_health_check(health_monitor):
+    """Test health check functionality."""
+    # Perform a health check
+    status = await health_monitor.check_health()
+    
+    # Verify status structure
+    assert "timestamp" in status
+    assert "cpu_usage" in status
+    assert "memory_usage" in status
+    assert "disk_usage" in status
+    assert "healthy" in status
+    
+    # Verify values are within expected ranges
+    assert 0 <= status["cpu_usage"] <= 100
+    assert 0 <= status["memory_usage"] <= 100
+    assert 0 <= status["disk_usage"] <= 100
+    assert isinstance(status["healthy"], bool)
+    
+    # Verify history was updated
+    assert len(health_monitor.health_history) > 0
+    assert health_monitor.health_history[-1] == status
+
+@pytest.mark.asyncio
+async def test_health_monitor_history_limit(health_monitor):
+    """Test health monitor history limit."""
+    # Generate more health checks than the history limit
+    for _ in range(settings.HEALTH_MAX_HISTORY + 10):
+        await health_monitor.check_health()
+    
+    # Verify history size is not exceeded
+    assert len(health_monitor.health_history) <= settings.HEALTH_MAX_HISTORY
+
+@pytest.mark.asyncio
+async def test_record_request(health_monitor):
+    """Test request recording."""
+    # Record a request
+    await health_monitor.record_request(0.5)
+    
+    # Verify metrics were updated
+    assert health_monitor.request_count._value.get() > 0
+    assert health_monitor.response_time._sum.get() > 0
+    assert health_monitor.response_time._count.get() > 0
+
+@pytest.mark.asyncio
+async def test_record_error(health_monitor):
+    """Test error recording."""
+    # Record an error
+    await health_monitor.record_error()
+    
+    # Verify error count was updated
+    assert health_monitor.error_count._value.get() > 0
+
+@pytest.mark.asyncio
+async def test_get_health_history(health_monitor):
+    """Test getting health history."""
+    # Generate some health checks
+    for _ in range(5):
+        await health_monitor.check_health()
+    
+    # Get full history
+    full_history = await health_monitor.get_health_history()
+    assert len(full_history) == 5
+    
+    # Get limited history
+    limited_history = await health_monitor.get_health_history(limit=3)
+    assert len(limited_history) == 3
+    assert limited_history == full_history[-3:]
+
+@pytest.mark.asyncio
+async def test_get_current_metrics(health_monitor):
+    """Test getting current metrics."""
+    # Record some metrics
+    await health_monitor.record_request(0.5)
+    await health_monitor.record_error()
+    
+    # Get current metrics
+    metrics = await health_monitor.get_current_metrics()
+    
+    # Verify metrics structure
+    assert "cpu_usage" in metrics
+    assert "memory_usage" in metrics
+    assert "disk_usage" in metrics
+    assert "request_count" in metrics
+    assert "error_count" in metrics
+    
+    # Verify values
+    assert metrics["request_count"] > 0
+    assert metrics["error_count"] > 0 

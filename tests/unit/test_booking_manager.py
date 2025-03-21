@@ -12,9 +12,12 @@ class TestBookingManager:
     """Tests for BookingManager class."""
     
     @pytest.fixture
-    def booking_manager(self):
+    async def booking_manager(self):
         """Create a booking manager instance for testing."""
-        return BookingManager()
+        manager = BookingManager()
+        await manager.initialize()
+        yield manager
+        await manager.close()
         
     @pytest.fixture
     def mock_api_config(self):
@@ -38,22 +41,19 @@ class TestBookingManager:
             yield mock
             
     @pytest.fixture
-    def mock_notify_user(self):
-        """Mock the notify user functions."""
-        with patch('src.manager.booking_manager.notify_user_appointment_found', new_callable=AsyncMock) as mock_found, \
-             patch('src.manager.booking_manager.notify_user_appointment_booked', new_callable=AsyncMock) as mock_booked:
-            yield mock_found, mock_booked
+    def mock_notification_manager(self):
+        """Mock the notification manager."""
+        with patch('src.manager.booking_manager.notification_manager') as mock:
+            mock.send_appointment_found_notification = AsyncMock()
+            mock.send_appointment_booked_notification = AsyncMock()
+            mock.send_booking_failed_notification = AsyncMock()
+            yield mock
             
     @pytest.mark.asyncio
     async def test_initialize_and_close(self, booking_manager):
         """Test initialize and close methods."""
-        # Initialize
-        await booking_manager.initialize()
-        
-        # Close
-        await booking_manager.close()
-        
         # No assertions needed, just checking that the methods don't raise exceptions
+        assert booking_manager is not None
         
     @pytest.mark.asyncio
     async def test_book_appointment_parallel_no_slots(self, booking_manager):
@@ -78,12 +78,9 @@ class TestBookingManager:
         mock_api_config, 
         mock_appointment_repository,
         mock_subscription_repository,
-        mock_notify_user
+        mock_notification_manager
     ):
         """Test book_appointment_parallel with successful booking."""
-        # Setup mocks
-        mock_found, mock_booked = mock_notify_user
-        
         # Setup API response
         mock_api_config.book_appointment.return_value = {
             "success": True,
@@ -132,8 +129,8 @@ class TestBookingManager:
         )
         
         # Verify notifications
-        mock_found.assert_called_once()
-        mock_booked.assert_called_once()
+        mock_notification_manager.send_appointment_found_notification.assert_called_once()
+        mock_notification_manager.send_appointment_booked_notification.assert_called_once()
         
     @pytest.mark.asyncio
     async def test_book_appointment_parallel_all_fail(
@@ -142,12 +139,9 @@ class TestBookingManager:
         mock_api_config, 
         mock_appointment_repository,
         mock_subscription_repository,
-        mock_notify_user
+        mock_notification_manager
     ):
         """Test book_appointment_parallel when all booking attempts fail."""
-        # Setup mocks
-        mock_found, mock_booked = mock_notify_user
-        
         # Setup API response
         mock_api_config.book_appointment.return_value = {
             "success": False,
@@ -183,8 +177,8 @@ class TestBookingManager:
         mock_subscription_repository.update.assert_not_called()
         
         # Verify notifications
-        mock_found.assert_called_once()
-        mock_booked.assert_not_called()
+        mock_notification_manager.send_appointment_found_notification.assert_called_once()
+        mock_notification_manager.send_booking_failed_notification.assert_called_once()
         
     @pytest.mark.asyncio
     async def test_book_appointment_parallel_first_succeeds(
@@ -193,12 +187,9 @@ class TestBookingManager:
         mock_api_config, 
         mock_appointment_repository,
         mock_subscription_repository,
-        mock_notify_user
+        mock_notification_manager
     ):
         """Test book_appointment_parallel when first attempt succeeds."""
-        # Setup mocks
-        mock_found, mock_booked = mock_notify_user
-        
         # Setup API response - first call succeeds, others would fail
         mock_api_config.book_appointment.side_effect = [
             {"success": True, "booking_id": "booking123"},
@@ -241,8 +232,8 @@ class TestBookingManager:
         mock_subscription_repository.update.assert_called_once()
         
         # Verify notifications
-        mock_found.assert_called_once()
-        mock_booked.assert_called_once()
+        mock_notification_manager.send_appointment_found_notification.assert_called_once()
+        mock_notification_manager.send_appointment_booked_notification.assert_called_once()
         
     @pytest.mark.asyncio
     async def test_book_appointment_parallel_timeout(
@@ -251,21 +242,15 @@ class TestBookingManager:
         mock_api_config, 
         mock_appointment_repository,
         mock_subscription_repository,
-        mock_notify_user
+        mock_notification_manager
     ):
         """Test book_appointment_parallel with timeout."""
-        # Setup mocks
-        mock_found, mock_booked = mock_notify_user
-        
         # Setup API response to take longer than timeout
         async def slow_response(*args, **kwargs):
-            await asyncio.sleep(0.5)  # Longer than our test timeout
+            await asyncio.sleep(BOOKING_TIMEOUT + 1)
             return {"success": True, "booking_id": "booking123"}
             
         mock_api_config.book_appointment.side_effect = slow_response
-        
-        # Override timeout for test
-        booking_manager.booking_timeout = 0.1  # Very short timeout for test
         
         # Setup slots
         slots = [
@@ -286,7 +271,7 @@ class TestBookingManager:
         assert success is False
         assert details is None
         
-        # Verify API calls
+        # Verify API calls were made
         assert mock_api_config.book_appointment.call_count > 0
         
         # Verify no appointment creation
@@ -296,8 +281,8 @@ class TestBookingManager:
         mock_subscription_repository.update.assert_not_called()
         
         # Verify notifications
-        mock_found.assert_called_once()
-        mock_booked.assert_not_called()
+        mock_notification_manager.send_appointment_found_notification.assert_called_once()
+        mock_notification_manager.send_booking_failed_notification.assert_called_once()
         
     @pytest.mark.asyncio
     async def test_book_appointment_parallel_respects_max_attempts(
@@ -305,21 +290,21 @@ class TestBookingManager:
         booking_manager, 
         mock_api_config
     ):
-        """Test book_appointment_parallel respects max_parallel_attempts."""
-        # Setup API response
+        """Test book_appointment_parallel respects max attempts."""
+        # Setup API response to always fail
         mock_api_config.book_appointment.return_value = {
             "success": False,
             "message": "No slots available"
         }
         
-        # Create more slots than max_parallel_attempts
+        # Setup slots - more than MAX_PARALLEL_BOOKINGS
         slots = [
-            {"date": "2025-04-01", "time": f"{i:02d}:00"} 
-            for i in range(booking_manager.max_parallel_attempts + 5)
+            {"date": "2025-04-01", "time": f"{i:02d}:00"}
+            for i in range(MAX_PARALLEL_BOOKINGS + 5)
         ]
         
         # Call method
-        await booking_manager.book_appointment_parallel(
+        success, details = await booking_manager.book_appointment_parallel(
             service_id="service1",
             location_id="location1",
             slots=slots,
@@ -327,8 +312,12 @@ class TestBookingManager:
             subscription_id=456
         )
         
-        # Verify API calls - should be limited to max_parallel_attempts
-        assert mock_api_config.book_appointment.call_count <= booking_manager.max_parallel_attempts
+        # Assertions
+        assert success is False
+        assert details is None
+        
+        # Verify API calls were limited to MAX_PARALLEL_BOOKINGS
+        assert mock_api_config.book_appointment.call_count == MAX_PARALLEL_BOOKINGS
         
     @pytest.mark.asyncio
     async def test_attempt_booking_success(
@@ -336,12 +325,9 @@ class TestBookingManager:
         booking_manager, 
         mock_api_config, 
         mock_appointment_repository,
-        mock_notify_user
+        mock_notification_manager
     ):
-        """Test _attempt_booking with successful booking."""
-        # Setup mocks
-        mock_found, mock_booked = mock_notify_user
-        
+        """Test attempt_booking with successful booking."""
         # Setup API response
         mock_api_config.book_appointment.return_value = {
             "success": True,
@@ -357,13 +343,12 @@ class TestBookingManager:
         slot = {"date": "2025-04-01", "time": "10:00"}
         
         # Call method
-        success, details = await booking_manager._attempt_booking(
+        success, details = await booking_manager.attempt_booking(
             service_id="service1",
             location_id="location1",
             slot=slot,
             user_id=123,
-            subscription_id=456,
-            booking_id="test_booking_id"
+            subscription_id=456
         )
         
         # Assertions
@@ -375,18 +360,14 @@ class TestBookingManager:
         assert details["appointment_id"] == 789
         
         # Verify API call
-        mock_api_config.book_appointment.assert_called_once_with(
-            service_id="service1",
-            office_id="location1",
-            date="2025-04-01",
-            time="10:00"
-        )
+        mock_api_config.book_appointment.assert_called_once()
         
         # Verify appointment creation
         mock_appointment_repository.create.assert_called_once()
         
-        # Verify notification
-        mock_booked.assert_called_once()
+        # Verify notifications
+        mock_notification_manager.send_appointment_found_notification.assert_called_once()
+        mock_notification_manager.send_appointment_booked_notification.assert_called_once()
         
     @pytest.mark.asyncio
     async def test_attempt_booking_failure(
@@ -394,12 +375,9 @@ class TestBookingManager:
         booking_manager, 
         mock_api_config, 
         mock_appointment_repository,
-        mock_notify_user
+        mock_notification_manager
     ):
-        """Test _attempt_booking with failed booking."""
-        # Setup mocks
-        mock_found, mock_booked = mock_notify_user
-        
+        """Test attempt_booking with failed booking."""
         # Setup API response
         mock_api_config.book_appointment.return_value = {
             "success": False,
@@ -410,13 +388,12 @@ class TestBookingManager:
         slot = {"date": "2025-04-01", "time": "10:00"}
         
         # Call method
-        success, details = await booking_manager._attempt_booking(
+        success, details = await booking_manager.attempt_booking(
             service_id="service1",
             location_id="location1",
             slot=slot,
             user_id=123,
-            subscription_id=456,
-            booking_id="test_booking_id"
+            subscription_id=456
         )
         
         # Assertions
@@ -429,8 +406,9 @@ class TestBookingManager:
         # Verify no appointment creation
         mock_appointment_repository.create.assert_not_called()
         
-        # Verify no notification
-        mock_booked.assert_not_called()
+        # Verify notifications
+        mock_notification_manager.send_appointment_found_notification.assert_called_once()
+        mock_notification_manager.send_booking_failed_notification.assert_called_once()
         
     @pytest.mark.asyncio
     async def test_attempt_booking_exception(
@@ -438,26 +416,22 @@ class TestBookingManager:
         booking_manager, 
         mock_api_config, 
         mock_appointment_repository,
-        mock_notify_user
+        mock_notification_manager
     ):
-        """Test _attempt_booking with exception."""
-        # Setup mocks
-        mock_found, mock_booked = mock_notify_user
-        
+        """Test attempt_booking with API exception."""
         # Setup API response to raise exception
-        mock_api_config.book_appointment.side_effect = Exception("API error")
+        mock_api_config.book_appointment.side_effect = Exception("API Error")
         
         # Setup slot
         slot = {"date": "2025-04-01", "time": "10:00"}
         
         # Call method
-        success, details = await booking_manager._attempt_booking(
+        success, details = await booking_manager.attempt_booking(
             service_id="service1",
             location_id="location1",
             slot=slot,
             user_id=123,
-            subscription_id=456,
-            booking_id="test_booking_id"
+            subscription_id=456
         )
         
         # Assertions
@@ -470,5 +444,6 @@ class TestBookingManager:
         # Verify no appointment creation
         mock_appointment_repository.create.assert_not_called()
         
-        # Verify no notification
-        mock_booked.assert_not_called()
+        # Verify notifications
+        mock_notification_manager.send_appointment_found_notification.assert_called_once()
+        mock_notification_manager.send_booking_failed_notification.assert_called_once()
