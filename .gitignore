@@ -65,3 +65,5 @@ dump/
 
 
 .cursor
+debug/
+.debug/
